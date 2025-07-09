@@ -1,0 +1,4 @@
+.mae/
+output/
+*.pyc
+checkpoint/
