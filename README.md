@@ -21,41 +21,11 @@ Inspired by recent success of VideoMAE, MAE-DFER makes an early attempt to devis
 
 Extensive experiments on *six* DFER datasets show that our MAE-DFER *consistently* outperforms the previous best supervised methods by *significant* margins (**\+5∼8%** UAR on three *in-the-wild* datasets and **\+7∼12%** WAR on three *lab-controlled* datasets), which demonstrates that it can learn *powerful* dynamic facial representations for DFER via large-scale self-supervised pre-training. We believe MAE-DFER **has paved a new way** for the advancement of DFER and can inspire more relevant research in this field and even other related tasks (e.g., dynamic micro-expression recognition and facial action unit detection).
 
-### 🚀 Main Results
-
-#### ✨ DFEW
-
-![Result_on_DFEW](figs/Result_on_DFEW.png)
-
-#### ✨ FERV39k
-
-![Result_on_FERV39k](figs/Result_on_FERV39k.png)
-
-#### ✨ MAFW
-
-![Result_on_MAFW](figs/Result_on_MAFW.png)
-
-
-### 👀 Visualization
-
-#### ✨ Reconstruction 
-
-![Sample_with_showing_frame_difference](figs/Sample_with_showing_frame_difference.png)
-
-More samples without showing frame difference:
-![More_samples_without_showing_frame_difference](figs/More_samples_without_showing_frame_difference.png)
-
-
-#### ✨ t-SNE on DFEW
-
-
-![t-SNE_on_DFEW](figs/t-SNE.png)
-
 
 
 ### 🔨 Installation
 
-Main prerequisites:
+dependencies:
 
 * `Python 3.8`
 * `PyTorch 1.7.1 (cuda 10.2)`
@@ -68,8 +38,6 @@ Main prerequisites:
 * `numpy=1.23.4`
 * `opencv-python=4.7.0.72`
 * `tensorboardX=2.6.1`
-
-If some are missing, please refer to [environment.yml](environment.yml) for more details.
 
 
 ### ➡️ Data Preparation
@@ -107,6 +75,8 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
     
     You can download our pre-trained model on VoxCeleb2 from [here](https://drive.google.com/file/d/1nzvMITUHic9fKwjQ7XLcnaXYViWTawRv/view?usp=sharing) and put it into [this folder](saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170).
 
+    Put the pre-train model at `saved/model/pretraining/voxceleb2/videomae_pretrain_xxx` for fine-tuning
+  
 ### ⤴️ Fine-tuning with pre-trained models
 
 - DFEW
@@ -162,3 +132,10 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
     |  Total (Reported)     | 41.62      | 54.31    | - |
 
     Note that we lost the original ckpts for this dataset. However, the reproduced result is slightly better than that reported in the paper.
+
+### ↕️ Demo
+Place the fine-tuned model in `checkpoint/` to demo.
+  ```
+  python demo.py
+  ```
+The output will be saved in `output/`
