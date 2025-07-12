@@ -349,6 +349,7 @@ class PatchEmbed(nn.Module):
     def forward(self, x, **kwargs):
         B, C, T, H, W = x.shape
         # FIXME look at relaxing size constraints
+        # print("PatchEmbed: B, C, T, H, W:", B, C, T, H, W)
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x).flatten(2).transpose(1, 2)
@@ -518,6 +519,8 @@ class VisionTransformer(nn.Module):
         B, _, _ = x.size()
 
         if self.pos_embed is not None:
+            # print("shape of pos_embed:", self.pos_embed.shape)
+            # print("shape of x before pos_embed:", x.shape)
             x = x + self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
         x = self.pos_drop(x)
 

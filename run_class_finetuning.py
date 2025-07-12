@@ -163,7 +163,7 @@ def get_args():
     parser.add_argument('--num_frames', type=int, default= 16)
     parser.add_argument('--sampling_rate', type=int, default= 4)
     parser.add_argument('--data_set', default='Kinetics-400', choices=['Kinetics-400', 'SSV2', 'UCF101', 'HMDB51','image_folder',
-                        'DFEW', 'FERV39k', 'MAFW', 'RAVDESS', 'CREMA-D', 'ENTERFACE'],
+                        'DFEW', 'FERV39k', 'MAFW', 'RAVDESS', 'CREMA-D', 'ENTERFACE', 'Gaze360'],
                         type=str, help='dataset')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
@@ -249,6 +249,8 @@ def main(args, ds_init):
     cudnn.benchmark = True
 
     dataset_train, args.nb_classes = build_dataset(is_train=True, test_mode=False, args=args)
+    print("Dataset_train = %s" % str(dataset_train))
+    print("len dataset_train = %d" % len(dataset_train))
     if args.disable_eval_during_finetuning:
         dataset_val = None
     else:
@@ -327,6 +329,7 @@ def main(args, ds_init):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
+    print("model = %s" % args.model)
     if 'no_depth' in args.model and args.depth is not None:
         print(f"==> Note: use custom model depth={args.depth}!")
         model = create_model(
@@ -372,6 +375,11 @@ def main(args, ds_init):
             lg_no_second=args.lg_no_second, lg_no_third=args.lg_no_third,
         )
 
+    # 针对Gaze360任务修改输出层
+    if args.data_set == 'Gaze360':
+        in_features = model.head.in_features
+        model.head = torch.nn.Linear(in_features, 2)  # 输出俯仰角和偏航角
+    
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
     args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
@@ -512,6 +520,8 @@ def main(args, ds_init):
         args.weight_decay_end = args.weight_decay
     wd_schedule_values = utils.cosine_scheduler(
         args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
+    print("num_training_steps_per_epoch = %d" % num_training_steps_per_epoch)
+    print("wd_schedule_values = %s" % str(wd_schedule_values))
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
     if mixup_fn is not None:

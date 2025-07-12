@@ -385,9 +385,80 @@ def build_dataset(is_train, test_mode, args):
         )
         nb_classes = 6
 
+    elif args.data_set == 'Gaze360':
+        mode = None
+        anno_path = None
+        if is_train is True:
+            mode = 'train'
+            anno_path = os.path.join(args.data_path, 'train.csv')
+        elif test_mode is True:
+            mode = 'test'
+            anno_path = os.path.join(args.data_path, 'test.csv')
+        else:
+            mode = 'validation'
+            anno_path = os.path.join(args.data_path, 'val.csv')
+
+        from kinetics import VideoClsDatasetGaze360
+        dataset = VideoClsDatasetGaze360(
+            anno_path=anno_path,
+            data_path='/',
+            mode=mode,
+            clip_len=args.num_frames,
+            frame_sample_rate=args.sampling_rate,
+            num_segment=1,
+            test_num_segment=args.test_num_segment,
+            test_num_crop=args.test_num_crop,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=args.input_size,
+            short_side_size=args.short_side_size,
+            file_ext='jpg',
+            predict_last_frame=True,  # Predict the gaze of the last frame
+            args=args,
+        )
+        nb_classes = 3  
+
     else:
         raise NotImplementedError()
     assert nb_classes == args.nb_classes
     print("Number of the class = %d" % args.nb_classes)
 
     return dataset, nb_classes
+
+
+# 添加gaze360数据集构建函数
+
+def build_gaze360_dataset(args, is_train):
+    from gaze360.code.loader4finetune import ImagerLoader
+    import torchvision.transforms as transforms
+    
+    # 数据变换
+    if is_train:
+        transform = transforms.Compose([
+            transforms.Resize((160, 160)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                               std=[0.229, 0.224, 0.225])
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize((160, 160)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                               std=[0.229, 0.224, 0.225])
+        ])
+    
+    # 数据集路径
+    if is_train:
+        file_name = os.path.join(args.data_path, 'train.txt')
+    else:
+        file_name = os.path.join(args.data_path, 'test.txt')
+    
+    dataset = ImagerLoader(
+        source_path="../GazeCapture/Gaze360",
+        file_name=file_name,
+        transform=transform,
+        input_len=8
+    )
+    
+    return dataset

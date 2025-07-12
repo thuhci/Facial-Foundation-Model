@@ -291,7 +291,7 @@ def main(args, ds_init):
     else:
         collate_func = None
         
-    collate_func = None # [debug]
+    # collate_func = None # [debug]
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -385,7 +385,7 @@ def main(args, ds_init):
     # 针对Gaze360任务修改输出层
     if args.data_set == 'Gaze360':
         in_features = model.head.in_features
-        model.head = torch.nn.Linear(in_features, 2)  # 输出俯仰角和偏航角
+        model.head = torch.nn.Linear(in_features, 3)  # 输出yaw, pitch, roll三个角度
     
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -533,18 +533,59 @@ def main(args, ds_init):
     print("wd_schedule_values = %s" % str(wd_schedule_values))
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
-    # if mixup_fn is not None:
-    #     # smoothing is handled with mixup label transform
-    #     criterion = SoftTargetCrossEntropy()
-    # elif args.smoothing > 0.:
-    #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    # elif args.data_set in ['Gaze360']:
-    #     # for gaze estimation, we use cross entropy loss
-    #     criterion = torch.nn.MSELoss(reduction='mean')
-    # else:
-    #     criterion = torch.nn.CrossEntropyLoss()
+    # 定义L2CS损失函数
+    def compute_angular_error(preds, labels):
+        """计算角度误差"""
+        # 确保输入是弧度制
+        preds_rad = preds if preds.max() <= np.pi else preds * np.pi / 180
+        labels_rad = labels if labels.max() <= np.pi else labels * np.pi / 180
         
-    criterion = torch.nn.MSELoss(reduction='mean')
+        # 计算角度差的余弦值
+        cos_diff = torch.cos(preds_rad) * torch.cos(labels_rad) + torch.sin(preds_rad) * torch.sin(labels_rad)
+        cos_diff = torch.clamp(cos_diff, -1.0, 1.0)  # 防止数值误差
+        
+        # 计算角度误差
+        angular_error = torch.acos(cos_diff) * 180.0 / np.pi  # 转换为度
+        return torch.mean(angular_error)
+
+    def l2cs_loss(preds, labels, alpha=1.0, beta=1.0):
+        """
+        L2CS损失函数：结合MSE损失和角度损失
+        Args:
+            preds: 预测的gaze向量 [batch_size, 3] (yaw, pitch, roll)
+            labels: 真实的gaze向量 [batch_size, 3]
+            alpha: MSE损失权重
+            beta: 角度损失权重
+        """
+        # MSE损失
+        mse_loss = torch.nn.functional.mse_loss(preds, labels)
+        
+        # 角度损失（仅针对yaw和pitch）
+        if preds.shape[1] >= 2:
+            angular_loss = 0
+            for i in range(2):  # yaw和pitch
+                angular_loss += compute_angular_error(preds[:, i], labels[:, i])
+            angular_loss = angular_loss / 2.0
+        else:
+            angular_loss = torch.tensor(0.0, device=preds.device)
+        
+        total_loss = alpha * mse_loss + beta * angular_loss
+        return total_loss, mse_loss, angular_loss
+
+    # 选择损失函数
+    if args.data_set == 'Gaze360':
+        criterion = lambda preds, labels: l2cs_loss(preds, labels, alpha=1.0, beta=0.1)[0]
+        criterion_detailed = l2cs_loss  # 用于获取详细损失信息
+    elif mixup_fn is not None:
+        # smoothing is handled with mixup label transform
+        criterion = SoftTargetCrossEntropy()
+        criterion_detailed = None
+    elif args.smoothing > 0.:
+        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+        criterion_detailed = None
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
+        criterion_detailed = None
 
     print("criterion = %s" % str(criterion))
 
@@ -554,41 +595,58 @@ def main(args, ds_init):
 
     if args.eval:
         preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
-        test_stats = final_test(data_loader_test, model, device, preds_file, save_feature=args.save_feature)
+        test_stats = final_test(data_loader_test, model, device, preds_file, save_feature=args.save_feature, args=args)
         torch.distributed.barrier()
         if global_rank == 0:
             print("Start merging results...")
-            final_top1 ,final_top5, pred_dict = merge(args.output_dir, num_tasks, args)
-            print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
-            log_stats = {'Final Top-1': final_top1,
-                        'Final Top-5': final_top5}
-            # me: more metrics
-            from sklearn.metrics import confusion_matrix, f1_score
-            preds, labels = pred_dict['pred'], pred_dict['label']
-            print(f'Total test samples: {len(preds)}')
-            conf_mat = confusion_matrix(y_pred=preds, y_true=labels)
-            print(f'Confusion Matrix:\n{conf_mat}')
-            class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
-            print(f"Class Accuracies: {[f'{i:.2%}' for i in class_acc]}")
-            uar = np.mean(class_acc)
-            war = conf_mat.trace() / conf_mat.sum()
-            print(f'UAR: {uar:.2%}, WAR: {war:.2%}')
-            weighted_f1 = f1_score(y_pred=preds, y_true=labels, average='weighted')
-            micro_f1 = f1_score(y_pred=preds, y_true=labels, average='micro')
-            macro_f1 = f1_score(y_pred=preds, y_true=labels, average='macro')
-            print(f'Weighted F1: {weighted_f1:.4f}, micro F1: {micro_f1:.4f}, macro F1: {macro_f1:.4f}')
+            if args.data_set == 'Gaze360':
+                # 回归任务的结果合并和评估
+                final_mae, final_mse, pred_dict = merge(args.output_dir, num_tasks, args)
+                print(f"Angular error on the {len(dataset_test)} test videos: MAE: {final_mae:.4f}°, MSE: {final_mse:.6f}")
+                log_stats = {'Final MAE': final_mae, 'Final MSE': final_mse}
+            else:
+                # 分类任务的结果合并和评估
+                final_top1, final_top5, pred_dict = merge(args.output_dir, num_tasks, args)
+                print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
+                log_stats = {'Final Top-1': final_top1, 'Final Top-5': final_top5}
+                
+                # 分类任务的详细指标
+                try:
+                    from sklearn.metrics import confusion_matrix, f1_score
+                    preds, labels = pred_dict['pred'], pred_dict['label']
+                    print(f'Total test samples: {len(preds)}')
+                    conf_mat = confusion_matrix(y_pred=preds, y_true=labels)
+                    print(f'Confusion Matrix:\n{conf_mat}')
+                    class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
+                    print(f"Class Accuracies: {[f'{i:.2%}' for i in class_acc]}")
+                    uar = np.mean(class_acc)
+                    war = conf_mat.trace() / conf_mat.sum()
+                    print(f'UAR: {uar:.2%}, WAR: {war:.2%}')
+                    weighted_f1 = f1_score(y_pred=preds, y_true=labels, average='weighted')
+                    micro_f1 = f1_score(y_pred=preds, y_true=labels, average='micro')
+                    macro_f1 = f1_score(y_pred=preds, y_true=labels, average='macro')
+                    print(f'Weighted F1: {weighted_f1:.4f}, micro F1: {micro_f1:.4f}, macro F1: {macro_f1:.4f}')
+                except ImportError:
+                    print("sklearn not available, skipping detailed classification metrics")
 
             if args.output_dir and utils.is_main_process():
                 with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                     f.write(json.dumps(log_stats) + "\n")
-                    f.write(f'Final UAR: {uar:.2%}, Final WAR: {war:.2%}\n')
-                    f.write(f'Final Confusion Matrix:\n{conf_mat}\n')
-                    f.write(f'Final Class Accuracies: {[f"{i:.2%}" for i in class_acc]}\n')
-                    f.write(f'Final Weighted F1: {weighted_f1:.4f}, Final Micro F1: {micro_f1:.4f}, Final Macro F1: {macro_f1:.4f}\n')
+                    if args.data_set != 'Gaze360':
+                        try:
+                            f.write(f'Final UAR: {uar:.2%}, Final WAR: {war:.2%}\n')
+                            f.write(f'Final Confusion Matrix:\n{conf_mat}\n')
+                            f.write(f'Final Class Accuracies: {[f"{i:.2%}" for i in class_acc]}\n')
+                            f.write(f'Final Weighted F1: {weighted_f1:.4f}, Final Micro F1: {micro_f1:.4f}, Final Macro F1: {macro_f1:.4f}\n')
+                        except:
+                            pass
 
-                import pandas as pd
-                df = pd.DataFrame(pred_dict)
-                df.to_csv(os.path.join(args.output_dir, 'pred.csv'), index=False)
+                try:
+                    import pandas as pd
+                    df = pd.DataFrame(pred_dict)
+                    df.to_csv(os.path.join(args.output_dir, 'pred.csv'), index=False)
+                except ImportError:
+                    print("pandas not available, skipping CSV export")
 
         exit(0)
         
@@ -609,6 +667,7 @@ def main(args, ds_init):
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
+            args=args, criterion_detailed=criterion_detailed
         )
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
@@ -617,17 +676,39 @@ def main(args, ds_init):
                     loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema)
         if data_loader_val is not None:
             test_stats = validation_one_epoch(data_loader_val, model, device, args=args)
-            print(f"Accuracy of the network on the {len(dataset_val)} val videos: {test_stats['acc1']:.1f}%")
-            if (args.val_metric not in ['loss'] and best_metric < test_stats[args.val_metric]) or \
-                (args.val_metric in ['loss'] and best_metric > test_stats[args.val_metric]):
-                best_metric = test_stats[args.val_metric]
+            
+            if args.data_set == 'Gaze360':
+                # 回归任务的评估指标
+                print(f"Mean Angular Error on the {len(dataset_val)} val videos: {test_stats.get('mean_angle_error', 0):.4f} degrees")
+                print(f"MSE Loss on validation: {test_stats['loss']:.6f}")
+                # 使用角度误差作为主要指标
+                metric_key = 'mean_angle_error' if 'mean_angle_error' in test_stats else 'loss'
+                current_metric = test_stats[metric_key]
+                
+                # 对于角度误差，越小越好
+                if 'mean_angle_error' in test_stats:
+                    is_better = current_metric < best_metric if best_metric != -1e8 else True
+                else:
+                    is_better = current_metric < best_metric if best_metric != -1e8 else True
+            else:
+                # 分类任务的评估指标
+                print(f"Accuracy of the network on the {len(dataset_val)} val videos: {test_stats['acc1']:.1f}%")
+                current_metric = test_stats[args.val_metric]
+                is_better = (args.val_metric not in ['loss'] and current_metric > best_metric) or \
+                           (args.val_metric in ['loss'] and current_metric < best_metric)
+            
+            if (best_metric == -1e8) or is_better:
+                best_metric = current_metric
                 best_epoch = epoch
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
 
-            print(f"Best '{args.val_metric.upper()}': {best_metric:.4f}% (epoch={best_epoch})")
+            if args.data_set == 'Gaze360':
+                print(f"Best Mean Angular Error: {best_metric:.4f} degrees (epoch={best_epoch})")
+            else:
+                print(f"Best '{args.val_metric.upper()}': {best_metric:.4f}% (epoch={best_epoch})")
             if log_writer is not None:
                 log_writer.update(val_acc1=test_stats['acc1'], head="perf", step=epoch)
                 log_writer.update(val_acc5=test_stats['acc5'], head="perf", step=epoch)

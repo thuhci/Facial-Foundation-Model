@@ -3,7 +3,7 @@ import pandas as pd
 
 data_root = '../GazeCapture/Gaze360'
 
-for split in ["train", "validation", "test"]:
+for split in ["train", "val", "test"]:
 # split = "test"
     txt_path = f"../saved/data/gaze360/{split}.txt"
 
