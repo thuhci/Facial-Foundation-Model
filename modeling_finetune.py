@@ -464,7 +464,8 @@ class VisionTransformer(nn.Module):
 
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        # 原始的head保持不变，用于非L2CS模式
+        self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
         # me: add frame-level prediction support
         self.keep_temporal_dim = keep_temporal_dim
@@ -577,6 +578,14 @@ class VisionTransformer(nn.Module):
         x = self.forward_features(x)
         if save_feature:
             feature = x
+        
+        
+        if isinstance(self.head, nn.ModuleDict):
+            return {
+                'pitch': self.head['pitch'](x),
+                'yaw': self.head['yaw'](x)
+            }
+            
         x = self.head(x)
         # me: add head activation function support
         x = self.head_activation_func(x)

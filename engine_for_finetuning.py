@@ -15,7 +15,10 @@ def train_class_batch(model, samples, target, criterion, args=None):
     loss = criterion(outputs, target)
     return loss, outputs
 
+
+# [THIS IS WRONG]
 def train_gaze_batch(model, samples, target, criterion_detailed, args=None):
+
     """专门用于gaze回归任务的训练批次"""
     # 检查输入数据是否有异常值
     if torch.isnan(samples).any():
@@ -42,9 +45,9 @@ def train_gaze_batch(model, samples, target, criterion_detailed, args=None):
     
     # 使用详细损失函数
     if criterion_detailed is not None:
-        print("shape of outputs:", outputs.shape)
-        print("shape of target:", target.shape)
-        total_loss, mse_loss, angular_loss = criterion_detailed(outputs, target)
+        # print("shape of outputs:", outputs.shape)
+        # print("shape of target:", target.shape)
+        total_loss, mse_loss, angular_loss = criterion_detailed(outputs, target, args)
         return total_loss, outputs, mse_loss, angular_loss
     else:
         # 简单的MSE损失
@@ -52,49 +55,21 @@ def train_gaze_batch(model, samples, target, criterion_detailed, args=None):
         return loss, outputs, loss, torch.tensor(0.0)
 
 def train_l2cs_batch(model, samples, target, criterion, args=None):
-    # 检查输入数据是否有异常值
-    if torch.isnan(samples).any():
-        print("Warning: NaN detected in input samples!")
-        samples = torch.nan_to_num(samples, nan=0.0)
-    
-    if torch.isinf(samples).any():
-        print("Warning: Inf detected in input samples!")
-        samples = torch.nan_to_num(samples, posinf=1.0, neginf=-1.0)
-    
-    # 限制输入值范围
-    samples = torch.clamp(samples, min=-10.0, max=10.0)
-    
+    """专门用于L2CS训练的批次函数"""
     outputs = model(samples)
     
-    # 检查模型输出
-    if torch.isnan(outputs).any():
-        print("Warning: NaN detected in model outputs!")
-        print("Sample max:", samples.max().item())
-        print("Sample min:", samples.min().item())
-        print("Sample mean:", samples.mean().item())
-        outputs = torch.nan_to_num(outputs, nan=0.0)
+    if args and args.use_l2cs:
+        # L2CS模式：模型输出包含pitch和yaw两个分类头
+        if isinstance(outputs, dict):
+            total_loss, ce_loss, mse_loss, angular_error = criterion(outputs, target, args)
+        else:
+            raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
+    else:
+        # 原始回归模式
+        total_loss, mse_loss, angular_error = criterion(outputs, target)
+        ce_loss = torch.tensor(0.0, device=outputs.device)
     
-    if torch.isinf(outputs).any():
-        print("Warning: Inf detected in model outputs!")
-        outputs = torch.nan_to_num(outputs, posinf=1.0, neginf=-1.0)
-    
-    # print("outputs shape:", outputs.shape)
-    # print("targets shape:", target.shape)
-    
-    loss = criterion(outputs, target)
-    
-    angular_error = compute_angular_error(outputs, target)
-    
-    print('Angular Error is', angular_error.item())
-    
-    # 检查损失值
-    if torch.isnan(loss):
-        print("Warning: NaN loss detected!")
-        loss = torch.tensor(1.0, device=loss.device, requires_grad=True)
-    
-    # print("loss:", loss.item())
-    return loss, outputs
-
+    return total_loss, outputs, ce_loss, mse_loss, angular_error
 
 def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
@@ -150,35 +125,35 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         else:
             targets = targets.long()   # 分类任务使用long
         
-        print("samples shape:", samples.shape)
-        print("targets shape:", targets.shape)
+        # print("samples shape:", samples.shape)
+        # print("targets shape:", targets.shape)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
         if loss_scaler is None:
-            # 对于 Gaze360 数据集，不要转换为 half 类型
+            samples = samples.float()
             if args and args.data_set == 'Gaze360':
-                samples = samples.float()  # 保持 float 类型
-                if criterion_detailed is not None:
+                if args.use_l2cs:
+                    loss, output, ce_loss, mse_loss, angular_error = train_l2cs_batch(
+                        model, samples, targets, criterion, args)
+                    print(f"L2CS Loss - Total: {loss.item():.6f}, CE: {ce_loss.item():.6f}, MSE: {mse_loss.item():.6f}, Angular: {angular_error.item():.4f}°")
+                else:
+                    raise NotImplementedError("Gaze360 without L2CS not implemented in loss_scaler mode")
                     loss, output, mse_loss, angular_loss = train_gaze_batch(
                         model, samples, targets, criterion_detailed, args)
-                    # 记录详细损失信息
-                    print(f"Total Loss: {loss.item():.6f}, MSE: {mse_loss.item():.6f}, Angular: {angular_loss.item():.4f}°")
-                else:
-                    loss, output = train_class_batch(
-                        model, samples, targets, criterion, args)
+                    print(f"Gaze Loss - Total: {loss.item():.6f}, MSE: {mse_loss.item():.6f}, Angular: {angular_loss.item():.4f}°")
             else:
-                samples = samples.half()
-                # samples = samples.float()
-                
                 loss, output = train_class_batch(
                     model, samples, targets, criterion, args)
         else:
             with torch.cuda.amp.autocast():
-                if args and args.data_set == 'Gaze360' and criterion_detailed is not None:
-                    loss, output, mse_loss, angular_loss = train_gaze_batch(
-                        model, samples, targets, criterion_detailed, args)
+                if args and args.data_set == 'Gaze360':
+                    if args.use_l2cs:
+                        loss, output, ce_loss, mse_loss, angular_error = train_l2cs_batch(
+                            model, samples, targets, criterion, args)
+                    else:
+                        raise NotImplementedError("Gaze360 with L2CS not implemented in loss_scaler mode")
                 else:
                     loss, output = train_class_batch(
                         model, samples, targets, criterion, args)
@@ -216,16 +191,25 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        # 根据数据集类型计算准确率
+        # 计算准确率
         if mixup_fn is None:
             if args and args.data_set == 'Gaze360':
-                # 回归任务：计算角度误差
-                with torch.no_grad():
-                    # 计算每个样本的角度误差
-                    angle_errors = torch.sqrt(torch.sum((output - targets) ** 2, dim=1))
-                    class_acc = torch.mean(angle_errors)  # 平均角度误差作为"准确率"
+                if args.use_l2cs:
+                    # L2CS模式：使用角度误差作为准确率
+                    class_acc = angular_error
+                    metric_logger.update(angular_error=angular_error)
+                # else:
+                #     # 原始模式：计算角度误差
+                #     if isinstance(output, dict):
+                #         # 处理字典输出
+                #         pred_angles = torch.stack([output['pitch'], output['yaw']], dim=1)
+                #         target_angles = utils.gaze3d_to_gaze2d(targets)
+                #         class_acc = compute_angular_error(pred_angles, target_angles)
+                #     else:
+                #         # 处理tensor输出
+                #         angle_error = torch.sqrt(torch.sum((output - targets) ** 2, dim=1))
+                #         class_acc = torch.mean(angle_error)
             else:
-                # 分类任务：计算分类准确率
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
         else:
             class_acc = None
@@ -250,6 +234,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(class_acc=class_acc, head="loss")
+            if args and args.data_set == 'Gaze360':
+                log_writer.update(angular_error=angular_error, head="loss")
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
@@ -265,44 +251,49 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 
-def spherical2cartesial(x):
+# def spherical2cartesial(x):
     
-    output = torch.zeros(x.size(0),3)
-    output[:,2] = -torch.cos(x[:,1])*torch.cos(x[:,0])
-    output[:,0] = torch.cos(x[:,1])*torch.sin(x[:,0])
-    output[:,1] = torch.sin(x[:,1])
+#     output = torch.zeros(x.size(0),3)
+#     output[:,2] = -torch.cos(x[:,1])*torch.cos(x[:,0])
+#     output[:,0] = torch.cos(x[:,1])*torch.sin(x[:,0])
+#     output[:,1] = torch.sin(x[:,1])
 
-    return output
-def compute_angular_error(input,target):
+#     return output
+# def compute_angular_error(input,target):
 
-    input = spherical2cartesial(input)
-    target = spherical2cartesial(target)
+#     input = spherical2cartesial(input)
+#     target = spherical2cartesial(target)
 
-    input = input.view(-1,3,1)
-    target = target.view(-1,1,3)
-    output_dot = torch.bmm(target,input)
-    output_dot = output_dot.view(-1)
-    output_dot = torch.acos(output_dot)
-    output_dot = output_dot.data
-    output_dot = 180*torch.mean(output_dot)/math.pi
-    return output_dot
+#     input = input.view(-1,3,1)
+#     target = target.view(-1,1,3)
+#     output_dot = torch.bmm(target,input)
+#     output_dot = output_dot.view(-1)
+#     output_dot = torch.acos(output_dot)
+#     output_dot = output_dot.data
+#     output_dot = 180*torch.mean(output_dot)/math.pi
+#     return output_dot
 
 
 @torch.no_grad()
 def validation_one_epoch(data_loader, model, device, args=None):
-    # 根据数据集类型选择不同的损失函数
-    if args and args.data_set == 'Gaze360':
-        criterion = torch.nn.MSELoss()  # 回归任务使用MSE损失
+    if args and args.data_set == 'Gaze360' and args.use_l2cs:
+        # L2CS验证
+        criterion_ce = torch.nn.CrossEntropyLoss()
+        criterion_mse = torch.nn.MSELoss()
+        idx_tensor = torch.FloatTensor([idx for idx in range(args.num_bins)]).to(device)
+    elif args and args.data_set == 'Gaze360':
+        raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
+        criterion = torch.nn.MSELoss()
     else:
-        criterion = torch.nn.CrossEntropyLoss()  # 分类任务使用交叉熵损失
+        criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Val:'
-
-    # switch to evaluation mode
     model.eval()
 
     outputs, targets = [], []
+    total_angular_error = 0.0
+    num_samples = 0
 
     for batch in metric_logger.log_every(data_loader, 10, header):
         videos = batch[0]
@@ -310,69 +301,75 @@ def validation_one_epoch(data_loader, model, device, args=None):
         videos = videos.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
-        # compute output
         with torch.cuda.amp.autocast():
             output = model(videos)
-            loss = criterion(output, target)
-
-        # 根据数据集类型计算不同的准确率
-        if args and args.data_set == 'Gaze360':
-            # 回归任务：计算角度误差
-            angle_error = compute_angular_error(output, target)
-            acc1 = torch.mean(angle_error)  # 平均角度误差
-            acc5 = torch.mean(angle_error)  # 对于回归任务，acc5 = acc1
-        else:
-            # 分类任务：计算top-1和top-5准确率
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            
+            if args and args.data_set == 'Gaze360' and args.use_l2cs:
+                # L2CS验证
+                gaze_2d = utils.gaze3d_to_gaze2d(target)
+                pitch_target = gaze_2d[:, 0]
+                yaw_target = gaze_2d[:, 1]
+                
+                pitch_bins = utils.angles_to_bins(pitch_target, args.num_bins, args.bin_width)
+                yaw_bins = utils.angles_to_bins(yaw_target, args.num_bins, args.bin_width)
+                
+                pitch_pred = output['pitch']
+                yaw_pred = output['yaw']
+                
+                loss_pitch = criterion_ce(pitch_pred, pitch_bins)
+                loss_yaw = criterion_ce(yaw_pred, yaw_bins)
+                loss = loss_pitch + loss_yaw
+                
+                # 计算角度误差
+                softmax = torch.nn.Softmax(dim=1)
+                pitch_predicted = softmax(pitch_pred)
+                yaw_predicted = softmax(yaw_pred)
+                
+                pitch_continuous = utils.bins_to_angles(pitch_predicted, idx_tensor, args.bin_width)
+                yaw_continuous =utils.bins_to_angles(yaw_predicted, idx_tensor, args.bin_width)
+                
+                pred_angles = torch.stack([pitch_continuous, yaw_continuous], dim=1)
+                target_angles = torch.stack([pitch_target, yaw_target], dim=1)
+                angular_error = utils.compute_angular_error(pred_angles, target_angles)
+                
+                acc1 = angular_error
+                acc5 = angular_error
+                
+            elif args and args.data_set == 'Gaze360':
+                raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
+                # 原始回归验证
+                loss = criterion(output, target)
+                angle_error = torch.sqrt(torch.sum((output - target) ** 2, dim=1))
+                acc1 = torch.mean(angle_error)
+                acc5 = acc1
+                angular_error = acc1
+                
+            else:
+                # 分类验证
+                loss = criterion(output, target)
+                acc1, acc5 = accuracy(output, target, topk=(1, 5))
+                angular_error = torch.tensor(0.0)
         
-        output, target = output.cpu().detach().numpy(), target.cpu().detach().numpy()
-        outputs.append(output)
-        targets.append(target)
-
+        total_angular_error += angular_error.item() * videos.shape[0]
+        num_samples += videos.shape[0]
+        
         batch_size = videos.shape[0]
         metric_logger.update(loss=loss.item())
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
 
-    # 计算整体指标
-    if args and args.data_set == 'Gaze360':
-        # 回归任务的指标计算
-        preds, labels = np.concatenate(outputs), np.concatenate(targets)
-        # angle_errors = np.sqrt(np.sum((preds - labels) ** 2, axis=1))
-        angle_errors = compute_angular_error(torch.tensor(preds), torch.tensor(labels)).numpy()
-        mean_angle_error = np.mean(angle_errors)
-        
-        metric_logger.meters['mean_angle_error'].update(mean_angle_error, n=len(preds))
-        
-        print('* Mean Angle Error {mae:.4f} loss {losses.global_avg:.3f}'
-              .format(mae=mean_angle_error, losses=metric_logger.loss))
-    else:
-        # 分类任务的指标计算
-        preds, labels = np.concatenate(outputs), np.concatenate(targets)
-        preds = np.argmax(preds, axis=1)
-        from sklearn.metrics import confusion_matrix, f1_score
-        conf_mat = confusion_matrix(y_pred=preds, y_true=labels)
-        class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
-        uar = np.mean(class_acc)
-        war = conf_mat.trace() / conf_mat.sum()
-        weighted_f1 = f1_score(y_pred=preds, y_true=labels, average='weighted')
-        micro_f1 = f1_score(y_pred=preds, y_true=labels, average='micro')
-        macro_f1 = f1_score(y_pred=preds, y_true=labels, average='macro')
-        metric_logger.meters['uar'].update(uar, n=len(preds))
-        metric_logger.meters['war'].update(war, n=len(preds))
-        metric_logger.meters['weighted_f1'].update(weighted_f1, n=len(preds))
-        metric_logger.meters['micro_f1'].update(micro_f1, n=len(preds))
-        metric_logger.meters['macro_f1'].update(macro_f1, n=len(preds))
+    # 计算平均角度误差
+    mean_angular_error = total_angular_error / num_samples
+    metric_logger.meters['mean_angle_error'].update(mean_angular_error, n=num_samples)
 
+    if args and args.data_set == 'Gaze360':
+        print('* Mean Angular Error {mae:.4f}° loss {losses.global_avg:.6f}'
+              .format(mae=mean_angular_error, losses=metric_logger.loss))
+    else:
         print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
               .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
-        print('* WAR {war.global_avg:.4f} UAR {uar.global_avg:.4f} weighted_f1 {weighted_f1.global_avg:.4f} micro_f1 {micro_f1.global_avg:.4f} macro_f1 {macro_f1.global_avg:.4f}'
-              .format(war=metric_logger.war, uar=metric_logger.uar, weighted_f1=metric_logger.weighted_f1, micro_f1=metric_logger.micro_f1, macro_f1=metric_logger.macro_f1))
-
-    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 

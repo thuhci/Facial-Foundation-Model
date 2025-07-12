@@ -750,6 +750,20 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
             # Apply resize transformation
             # print(f"Loaded {len(buffer)} frames for sample {sample}")
             buffer = self.data_resize(buffer)
+            
+            # # debug 
+            # import matplotlib.pyplot as plt
+            # show_img = np.array(buffer[-1])
+            # show_lbl = self.label_array[index]
+            # show_name = sample
+            # plt.imshow(show_img)
+            # # plt.text(0, 0, f"Label: {show_lbl}, Name: {show_name}", color='black', fontsize=12)
+            # plt.title(f"Label: {show_lbl}, Name: {show_name}")
+            # plt.axis('off')
+            # # plt.show()
+            # plt.savefig(f"debug/debug_{index}.png", bbox_inches='tight', pad_inches=0.1)
+            # [checked, correct, BUT NOT NORMALIZED], done in _aug_frame
+            
             # print(f"After resizing, buffer length: {len(buffer)}")
             
             # Apply data augmentation

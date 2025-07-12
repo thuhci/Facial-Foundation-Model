@@ -193,6 +193,16 @@ def get_args():
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.set_defaults(pin_mem=True)
+    
+    # gazenet parameters
+    parser.add_argument('--use_l2cs', action='store_true', default=False,
+                        help='Use L2CS loss (classification + regression)')
+    parser.add_argument('--num_bins', type=int, default=90,
+                        help='Number of bins for L2CS classification (default: 90)')
+    parser.add_argument('--alpha_reg', type=float, default=1.0,
+                        help='Weight for regression loss in L2CS (default: 1.0)')
+    parser.add_argument('--bin_width', type=float, default=2.0,
+                        help='Width of each bin in degrees (default: 2.0)')
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -385,7 +395,16 @@ def main(args, ds_init):
     # 针对Gaze360任务修改输出层
     if args.data_set == 'Gaze360':
         in_features = model.head.in_features
-        model.head = torch.nn.Linear(in_features, 3)  # 输出yaw, pitch, roll三个角度
+        if args.use_l2cs:
+            # L2CS: 两个分类头，每个有 num_bins 个输出
+            # [DEBUG] change into ModuleList further, now like this for debug
+            model.head = torch.nn.ModuleDict({
+                'pitch': torch.nn.Linear(in_features, args.num_bins),
+                'yaw': torch.nn.Linear(in_features, args.num_bins)
+            })
+        else:
+            # 原始方式：直接回归3个角度
+            model.head = torch.nn.Linear(in_features, 3)
     
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -517,6 +536,21 @@ def main(args, ds_init):
             get_num_layer=assigner.get_layer_id if assigner is not None else None, 
             get_layer_scale=assigner.get_scale if assigner is not None else None)
         loss_scaler = NativeScaler()
+        
+        # 调试优化器参数组
+        print("Optimizer parameter groups:")
+        for i, group in enumerate(optimizer.param_groups):
+            print(f"Group {i}: lr_scale={group.get('lr_scale', 'NOT_SET')}, lr={group.get('lr', 'NOT_SET')}, weight_decay={group.get('weight_decay', 'NOT_SET')}")
+            print(f"         params count: {len(group['params'])}")
+        
+        # 手动设置初始学习率（如果没有设置的话）
+        # for group in optimizer.param_groups:
+        #     if 'lr' not in group or group['lr'] == 0:
+        #         group['lr'] = args.lr
+        #         print(f"Manually set lr to {args.lr} for group")
+        #     if 'lr_scale' not in group:
+        #         group['lr_scale'] = 1.0
+        #         print(f"Manually set lr_scale to 1.0 for group")
 
 
     # loss_scaler = None # [debug]
@@ -532,50 +566,24 @@ def main(args, ds_init):
     print("num_training_steps_per_epoch = %d" % num_training_steps_per_epoch)
     print("wd_schedule_values = %s" % str(wd_schedule_values))
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
-
-    # 定义L2CS损失函数
-    def compute_angular_error(preds, labels):
-        """计算角度误差"""
-        # 确保输入是弧度制
-        preds_rad = preds if preds.max() <= np.pi else preds * np.pi / 180
-        labels_rad = labels if labels.max() <= np.pi else labels * np.pi / 180
-        
-        # 计算角度差的余弦值
-        cos_diff = torch.cos(preds_rad) * torch.cos(labels_rad) + torch.sin(preds_rad) * torch.sin(labels_rad)
-        cos_diff = torch.clamp(cos_diff, -1.0, 1.0)  # 防止数值误差
-        
-        # 计算角度误差
-        angular_error = torch.acos(cos_diff) * 180.0 / np.pi  # 转换为度
-        return torch.mean(angular_error)
-
-    def l2cs_loss(preds, labels, alpha=1.0, beta=1.0):
-        """
-        L2CS损失函数：结合MSE损失和角度损失
-        Args:
-            preds: 预测的gaze向量 [batch_size, 3] (yaw, pitch, roll)
-            labels: 真实的gaze向量 [batch_size, 3]
-            alpha: MSE损失权重
-            beta: 角度损失权重
-        """
-        # MSE损失
-        mse_loss = torch.nn.functional.mse_loss(preds, labels)
-        
-        # 角度损失（仅针对yaw和pitch）
-        if preds.shape[1] >= 2:
-            angular_loss = 0
-            for i in range(2):  # yaw和pitch
-                angular_loss += compute_angular_error(preds[:, i], labels[:, i])
-            angular_loss = angular_loss / 2.0
-        else:
-            angular_loss = torch.tensor(0.0, device=preds.device)
-        
-        total_loss = alpha * mse_loss + beta * angular_loss
-        return total_loss, mse_loss, angular_loss
+    
+    # 调试学习率调度器
+    
+    print(f"LR schedule length: {len(lr_schedule_values)}")
+    print(f"LR schedule first 10 values: {lr_schedule_values[:10]}")
+    print(f"LR schedule max: {max(lr_schedule_values):.8f}, min: {min(lr_schedule_values):.8f}")
+    
 
     # 选择损失函数
-    if args.data_set == 'Gaze360':
-        criterion = lambda preds, labels: l2cs_loss(preds, labels, alpha=1.0, beta=0.1)[0]
-        criterion_detailed = l2cs_loss  # 用于获取详细损失信息
+    if args.data_set == 'Gaze360' and args.use_l2cs:
+        # L2CS损失函数
+        criterion = utils.criterion_l2cs
+        criterion_detailed = utils.criterion_l2cs
+        
+    elif args.data_set == 'Gaze360':
+        raise NotImplementedError("Gaze360 dataset requires L2CS loss, please set --use_l2cs")
+        criterion = lambda preds, labels: utils.l2cs_loss(preds, labels, alpha=1.0, beta=0.1)[0]
+        criterion_detailed = utils.l2cs_loss  # 用于获取详细损失信息
     elif mixup_fn is not None:
         # smoothing is handled with mixup label transform
         criterion = SoftTargetCrossEntropy()
@@ -782,3 +790,5 @@ if __name__ == '__main__':
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)
+
+
