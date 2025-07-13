@@ -271,6 +271,7 @@ def main(args, ds_init):
     
 
     num_tasks = utils.get_world_size()
+    print("num tasks = %d" % num_tasks)
     global_rank = utils.get_rank()
     sampler_train = torch.utils.data.DistributedSampler(
         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -305,7 +306,7 @@ def main(args, ds_init):
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
-        # sampler=sampler_train, # debug
+        sampler=sampler_train, # debug
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -403,8 +404,8 @@ def main(args, ds_init):
                 'yaw': torch.nn.Linear(in_features, args.num_bins)
             })
         else:
-            # 原始方式：直接回归3个角度
-            model.head = torch.nn.Linear(in_features, 3)
+            # 原始方式：直接回归2个角度
+            model.head = torch.nn.Linear(in_features, 2)
     
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -578,12 +579,12 @@ def main(args, ds_init):
     if args.data_set == 'Gaze360' and args.use_l2cs:
         # L2CS损失函数
         criterion = utils.criterion_l2cs
-        criterion_detailed = utils.criterion_l2cs
+        criterion_detailed = None
         
     elif args.data_set == 'Gaze360':
-        raise NotImplementedError("Gaze360 dataset requires L2CS loss, please set --use_l2cs")
-        criterion = lambda preds, labels: utils.l2cs_loss(preds, labels, alpha=1.0, beta=0.1)[0]
-        criterion_detailed = utils.l2cs_loss  # 用于获取详细损失信息
+        # raise NotImplementedError("Gaze360 dataset requires L2CS loss, please set --use_l2cs")
+        criterion = torch.nn.MSELoss()
+        criterion_detailed = None
     elif mixup_fn is not None:
         # smoothing is handled with mixup label transform
         criterion = SoftTargetCrossEntropy()
@@ -609,6 +610,7 @@ def main(args, ds_init):
             print("Start merging results...")
             if args.data_set == 'Gaze360':
                 # 回归任务的结果合并和评估
+                raise NotImplementedError("Gaze360 evaluation not implemented yet, please set --eval=False")
                 final_mae, final_mse, pred_dict = merge(args.output_dir, num_tasks, args)
                 print(f"Angular error on the {len(dataset_test)} test videos: MAE: {final_mae:.4f}°, MSE: {final_mse:.6f}")
                 log_stats = {'Final MAE': final_mae, 'Final MSE': final_mse}
@@ -675,7 +677,8 @@ def main(args, ds_init):
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
-            args=args, criterion_detailed=criterion_detailed
+            args=args
+            # , criterion_detailed=criterion_detailed
         )
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:

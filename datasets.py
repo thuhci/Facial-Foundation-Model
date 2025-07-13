@@ -416,7 +416,7 @@ def build_dataset(is_train, test_mode, args):
             predict_last_frame=True,  # Predict the gaze of the last frame
             args=args,
         )
-        nb_classes = 3  
+        nb_classes = 2
 
     else:
         raise NotImplementedError()
@@ -426,39 +426,39 @@ def build_dataset(is_train, test_mode, args):
     return dataset, nb_classes
 
 
-# 添加gaze360数据集构建函数
+# # 添加gaze360数据集构建函数
 
-def build_gaze360_dataset(args, is_train):
-    from gaze360.code.loader4finetune import ImagerLoader
-    import torchvision.transforms as transforms
+# def build_gaze360_dataset(args, is_train):
+#     from gaze360.code.loader4finetune import ImagerLoader
+#     import torchvision.transforms as transforms
     
-    # 数据变换
-    if is_train:
-        transform = transforms.Compose([
-            transforms.Resize((160, 160)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
-        ])
-    else:
-        transform = transforms.Compose([
-            transforms.Resize((160, 160)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
-        ])
+#     # 数据变换
+#     if is_train:
+#         transform = transforms.Compose([
+#             transforms.Resize((160, 160)),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+#                                std=[0.229, 0.224, 0.225])
+#         ])
+#     else:
+#         transform = transforms.Compose([
+#             transforms.Resize((160, 160)),
+#             transforms.ToTensor(),
+#             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+#                                std=[0.229, 0.224, 0.225])
+#         ])
     
-    # 数据集路径
-    if is_train:
-        file_name = os.path.join(args.data_path, 'train.txt')
-    else:
-        file_name = os.path.join(args.data_path, 'test.txt')
+#     # 数据集路径
+#     if is_train:
+#         file_name = os.path.join(args.data_path, 'train.txt')
+#     else:
+#         file_name = os.path.join(args.data_path, 'test.txt')
     
-    dataset = ImagerLoader(
-        source_path="../GazeCapture/Gaze360",
-        file_name=file_name,
-        transform=transform,
-        input_len=8
-    )
+#     dataset = ImagerLoader(
+#         source_path="../GazeCapture/Gaze360",
+#         file_name=file_name,
+#         transform=transform,
+#         input_len=8
+#     )
     
-    return dataset
+#     return dataset

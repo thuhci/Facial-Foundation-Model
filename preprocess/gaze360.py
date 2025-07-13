@@ -1,11 +1,11 @@
 import os
 import pandas as pd
 
-data_root = '../GazeCapture/Gaze360'
+data_root = 'Gaze360/normalized_imgs'
 
 for split in ["train", "val", "test"]:
 # split = "test"
-    txt_path = f"../saved/data/gaze360/{split}.txt"
+    txt_path = f"Gaze360/lbls/{split}.txt"
 
     txt_lines = []
     # read from txt file
@@ -31,7 +31,7 @@ for split in ["train", "val", "test"]:
     txt_lines.sort(key=lambda x: (x[1], x[2], x[3]))
     out_lines = [f"{line[0]}" for line in txt_lines]
     # write to csv file
-    csv_path = f"../saved/data/gaze360/{split}.csv"
+    csv_path = f"saved/data/gaze360/{split}.csv"
     df = pd.DataFrame(out_lines, columns=['file_path'])
     # no need the headline
     # df = pd.DataFrame(txt_lines)

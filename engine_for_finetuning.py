@@ -16,43 +16,15 @@ def train_class_batch(model, samples, target, criterion, args=None):
     return loss, outputs
 
 
-# [THIS IS WRONG]
-def train_gaze_batch(model, samples, target, criterion_detailed, args=None):
-
+def train_gaze_batch(model, samples, target, criterion, args=None):
     """专门用于gaze回归任务的训练批次"""
-    # 检查输入数据是否有异常值
-    if torch.isnan(samples).any():
-        print("Warning: NaN detected in input samples!")
-        samples = torch.nan_to_num(samples, nan=0.0)
-    
-    if torch.isinf(samples).any():
-        print("Warning: Inf detected in input samples!")
-        samples = torch.nan_to_num(samples, posinf=1.0, neginf=-1.0)
-    
     # 限制输入值范围
-    samples = torch.clamp(samples, min=-10.0, max=10.0)
-    
     outputs = model(samples)
     
-    # 检查模型输出
-    if torch.isnan(outputs).any():
-        print("Warning: NaN detected in model outputs!")
-        outputs = torch.nan_to_num(outputs, nan=0.0)
+    target_angles = utils.gaze3d_to_gaze2d(target)
     
-    if torch.isinf(outputs).any():
-        print("Warning: Inf detected in model outputs!")
-        outputs = torch.nan_to_num(outputs, posinf=1.0, neginf=-1.0)
-    
-    # 使用详细损失函数
-    if criterion_detailed is not None:
-        # print("shape of outputs:", outputs.shape)
-        # print("shape of target:", target.shape)
-        total_loss, mse_loss, angular_loss = criterion_detailed(outputs, target, args)
-        return total_loss, outputs, mse_loss, angular_loss
-    else:
-        # 简单的MSE损失
-        loss = torch.nn.functional.mse_loss(outputs, target)
-        return loss, outputs, loss, torch.tensor(0.0)
+    loss = criterion(outputs, target_angles)
+    return loss, outputs
 
 def train_l2cs_batch(model, samples, target, criterion, args=None):
     """专门用于L2CS训练的批次函数"""
@@ -81,7 +53,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None, args=None, criterion_detailed=None):
+                    num_training_steps_per_epoch=None, update_freq=None, args=None, 
+                    # criterion_detailed=None
+                    ):
     model.train(True)
     
     # print("before entering train_one_epoch, model.micro_steps:", getattr(model, 'micro_steps', 0))
@@ -139,10 +113,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                         model, samples, targets, criterion, args)
                     print(f"L2CS Loss - Total: {loss.item():.6f}, CE: {ce_loss.item():.6f}, MSE: {mse_loss.item():.6f}, Angular: {angular_error.item():.4f}°")
                 else:
-                    raise NotImplementedError("Gaze360 without L2CS not implemented in loss_scaler mode")
-                    loss, output, mse_loss, angular_loss = train_gaze_batch(
-                        model, samples, targets, criterion_detailed, args)
-                    print(f"Gaze Loss - Total: {loss.item():.6f}, MSE: {mse_loss.item():.6f}, Angular: {angular_loss.item():.4f}°")
+                    # raise NotImplementedError("Gaze360 without L2CS not implemented in loss_scaler mode")
+                    loss, output= train_gaze_batch(
+                        model, samples, targets, criterion, args)
+                    print(f"Gaze Loss - Total: {loss.item():.6f}, MSE: {loss.item():.6f},°")
             else:
                 loss, output = train_class_batch(
                     model, samples, targets, criterion, args)
@@ -153,7 +127,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                         loss, output, ce_loss, mse_loss, angular_error = train_l2cs_batch(
                             model, samples, targets, criterion, args)
                     else:
-                        raise NotImplementedError("Gaze360 with L2CS not implemented in loss_scaler mode")
+                        loss, output= train_gaze_batch(
+                            model, samples, targets, criterion, args)
                 else:
                     loss, output = train_class_batch(
                         model, samples, targets, criterion, args)
@@ -205,10 +180,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 #         pred_angles = torch.stack([output['pitch'], output['yaw']], dim=1)
                 #         target_angles = utils.gaze3d_to_gaze2d(targets)
                 #         class_acc = compute_angular_error(pred_angles, target_angles)
-                #     else:
-                #         # 处理tensor输出
-                #         angle_error = torch.sqrt(torch.sum((output - targets) ** 2, dim=1))
-                #         class_acc = torch.mean(angle_error)
+                else:
+                    # 处理tensor输出
+                    target_angles = utils.gaze3d_to_gaze2d(targets)
+                    angular_error = utils.compute_angular_error(output, target_angles)
+                    metric_logger.update(angular_error=angular_error)
+                    class_acc = angular_error
             else:
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
         else:
@@ -251,29 +228,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 
-# def spherical2cartesial(x):
-    
-#     output = torch.zeros(x.size(0),3)
-#     output[:,2] = -torch.cos(x[:,1])*torch.cos(x[:,0])
-#     output[:,0] = torch.cos(x[:,1])*torch.sin(x[:,0])
-#     output[:,1] = torch.sin(x[:,1])
-
-#     return output
-# def compute_angular_error(input,target):
-
-#     input = spherical2cartesial(input)
-#     target = spherical2cartesial(target)
-
-#     input = input.view(-1,3,1)
-#     target = target.view(-1,1,3)
-#     output_dot = torch.bmm(target,input)
-#     output_dot = output_dot.view(-1)
-#     output_dot = torch.acos(output_dot)
-#     output_dot = output_dot.data
-#     output_dot = 180*torch.mean(output_dot)/math.pi
-#     return output_dot
-
-
 @torch.no_grad()
 def validation_one_epoch(data_loader, model, device, args=None):
     if args and args.data_set == 'Gaze360' and args.use_l2cs:
@@ -282,7 +236,7 @@ def validation_one_epoch(data_loader, model, device, args=None):
         criterion_mse = torch.nn.MSELoss()
         idx_tensor = torch.FloatTensor([idx for idx in range(args.num_bins)]).to(device)
     elif args and args.data_set == 'Gaze360':
-        raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
+        # raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
         criterion = torch.nn.MSELoss()
     else:
         criterion = torch.nn.CrossEntropyLoss()
@@ -336,13 +290,18 @@ def validation_one_epoch(data_loader, model, device, args=None):
                 acc5 = angular_error
                 
             elif args and args.data_set == 'Gaze360':
-                raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
+                # raise NotImplementedError("Gaze360 without L2CS not implemented in validation")
                 # 原始回归验证
-                loss = criterion(output, target)
-                angle_error = torch.sqrt(torch.sum((output - target) ** 2, dim=1))
-                acc1 = torch.mean(angle_error)
+                # loss = criterion(output, target)
+                # angle_error = torch.sqrt(torch.sum((output - target) ** 2, dim=1))
+                # acc1 = torch.mean(angle_error)
+                # acc5 = acc1
+                # angular_error = acc1
+                target_angles = utils.gaze3d_to_gaze2d(target)
+                loss = criterion(output, target_angles)
+                angular_error = utils.compute_angular_error(output, target_angles)
+                acc1 = angular_error
                 acc5 = acc1
-                angular_error = acc1
                 
             else:
                 # 分类验证
