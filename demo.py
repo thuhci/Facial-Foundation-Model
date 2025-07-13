@@ -90,7 +90,11 @@ state_dict = checkpoint["model"]
 load_state_dict(model=model, state_dict=state_dict)
 model.eval()
 
-cap = cv2.VideoCapture(0)  
+print("Model loaded successfully.")
+
+# cap = cv2.VideoCapture(0)  
+# read from  a video file
+cap = cv2.VideoCapture('gaze360/code/test_video_3.mp4')
 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  160)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT,  160)
 
@@ -98,11 +102,14 @@ all_frames = []
 with torch.no_grad(): 
     while True:
         ret, frame = cap.read() 
+        # frame = np.zeros((160, 160, 3), dtype=np.uint8)  # Create a dummy frame for testing
+        # print("shape of frame:", frame.shape)
+        # ret = True  # Simulate successful frame capture
         if not ret:
             continue
         face, bbox = recognize_faces(frame, device='cpu')
         if face:
-            # print(f"Detected {len(face)} faces")
+            print(f"Detected {len(face)} faces")
             if len(all_frames)>=16:
                 all_frames.pop(0)
             all_frames.append(face[0])  
@@ -111,6 +118,8 @@ with torch.no_grad():
                 cv2.rectangle(frame, (x1-2, y1-2), (x2+2, y2+2), (255, 0, 0), 2)
                 
                 # cv2.putText(frame, emotion, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+        else:
+            print("No face detected")
         if len(all_frames)==16:
             buffer = all_frames
             short_side_size = 160
@@ -125,7 +134,7 @@ with torch.no_grad():
                 buffer = np.stack(buffer, 0)
     
             buffer = data_transform(buffer) # convert to tensor and normalize
-            # print(buffer.shape)
+            print(buffer.shape)
 
             buffer = np.expand_dims(buffer, axis=0) # add batch dimension
             buffer = torch.from_numpy(buffer)
@@ -136,7 +145,8 @@ with torch.no_grad():
             #     cv2.putText(sampled_frame, emotion, (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             #     cv2.imshow(f'Sampled Frame {i}', sampled_frame)
         
-        cv2.imshow('Emotion  Detection', frame)
+        # cv2.imshow('Emotion  Detection', frame)
+        cv2.imwrite('output/frame.jpg', frame)  # Save the frame with detected faces
         if cv2.waitKey(1)  & 0xFF == ord('q'):  
             break 
  

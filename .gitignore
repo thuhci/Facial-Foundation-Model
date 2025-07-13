@@ -2,3 +2,6 @@
 output/
 *.pyc
 checkpoint/
+imgs/
+Gaze360/
+*.pth

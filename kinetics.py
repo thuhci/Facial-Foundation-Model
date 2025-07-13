@@ -292,7 +292,7 @@ class VideoClsDatasetFrame(Dataset):
                  frame_sample_rate=2, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
                  num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, args=None,
-                 file_ext='jpg', task='classification'):
+                 file_ext='jpg', task='classification', gaze_frame_mode='last'):
         self.anno_path = anno_path
         self.data_path = data_path
         self.mode = mode
@@ -311,6 +311,8 @@ class VideoClsDatasetFrame(Dataset):
 
         # me: new added (for MAFW with .png file)
         self.file_ext = file_ext
+        self.task = task
+        self.gaze_frame_mode = gaze_frame_mode  # 'last' or 'middle' for gaze prediction
 
         self.aug = False
         self.rand_erase = False
@@ -323,9 +325,15 @@ class VideoClsDatasetFrame(Dataset):
 
         import pandas as pd
         cleaned = pd.read_csv(self.anno_path, header=None, delimiter=' ')
+        # print(f"==> Note: {self.anno_path} has {len(cleaned)} samples")
+        # print(f"example: {cleaned.values[0]} - {cleaned.values[0, 1]}")
         self.dataset_samples = list(cleaned.values[:, 0])
         # me: support multi-outputs
         if task != 'classification': # regression
+            # if task == 'gaze_regression':
+            #     # Gaze360: each row has path and 3 angle values (yaw, pitch, roll)
+            #     self.label_array = np.array(cleaned.values[:, 1:4], dtype=np.float32)
+            # else:
             self.label_array = np.array(cleaned.values[:, 1:], dtype=np.float32)
         else: # classification
             self.label_array = list(cleaned.values[:, 1])
@@ -614,6 +622,201 @@ class VideoReaderFrame:
 
     def load(self, idxs):
         return [self.pil_loader(self.frames[idx]) for idx in idxs]
+
+
+class VideoReaderGaze360:
+    """Specialized video reader for Gaze360 dataset with sequential frame prediction"""
+    def __init__(self, base_frame, file_ext='jpg', clip_len=16):
+        self.base_frame = base_frame.split('/')[-1].split('.')[0]  # get the base frame name without extension
+        self.base_frame = int(self.base_frame)  # convert to integer if it's a number
+        # print(f"==> Note: VideoReaderGaze360 initialized with base_frame: {self.base_frame}, file_ext: {file_ext}, clip_len: {clip_len}")
+        self.video_dir = base_frame.split('/')[:-1]
+        self.video_dir = os.path.join(*self.video_dir)  # join path components
+        # print(f"==> Note: VideoReaderGaze360 video_dir: {self.video_dir}")
+        self.file_ext = file_ext
+        self.clip_len = clip_len
+        self.frames = sorted(glob.glob(os.path.join(self.video_dir, f'*.{file_ext}')))
+
+
+    def pil_loader(self, path):
+        with open(path, "rb") as f:
+            img = Image.open(f)
+            return img.convert("RGB")
+
+    def load_clip(self):
+       
+        # end_idx = self.frames.index(self.base_frame)
+        # return_frames = []
+        # for i in range(end_idx, self.clip_len):
+        #     return_frames.append(self.frames[0])
+        # for i in range(max(0, end_idx - self.clip_len + 1), end_idx + 1):
+        #     return_frames.append(self.frames[i])
+        lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
+        return_frames = []
+        # print(f"==> Note[0]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
+        while os.path.exists(lst_available_frame) and len(return_frames) < self.clip_len:
+            # append from front
+            return_frames.append(lst_available_frame)
+            self.base_frame -= 1
+            lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
+        # print(f"==> Note[1]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
+        if len(return_frames) < self.clip_len:
+            # append from back
+            self.base_frame += 1
+            lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
+        # print(f"==> Note[2]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
+        while len(return_frames) < self.clip_len:
+            return_frames.append(lst_available_frame)
+            
+        # reverse the order to match the original sequence
+        return_frames.reverse()
+        
+        # print(f"Loading clip from {self.base_frame} with length {self.clip_len} from {self.video_dir}")
+        # print(f"end_idx: {self.base_frame}, clip_len: {self.clip_len}, frames: {self.frames}")
+        # print(f"return_frames: {return_frames}")
+        # print(f"return_frames: {len(return_frames)}")
+            
+        
+        return [self.pil_loader(frame) for frame in return_frames]
+
+
+class VideoClsDatasetGaze360(VideoClsDatasetFrame):
+    """Specialized dataset for Gaze360 sequential frame prediction"""
+    
+    def __init__(self, anno_path, data_path, mode='train', clip_len=16,
+                 frame_sample_rate=1, crop_size=224, short_side_size=256,
+                 new_height=256, new_width=340, keep_aspect_ratio=True,
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, args=None,
+                 file_ext='jpg', predict_last_frame=True):
+        # Initialize parent class with regression task
+        super().__init__(
+            anno_path=anno_path, data_path=data_path, mode=mode, clip_len=clip_len,
+            frame_sample_rate=frame_sample_rate, crop_size=crop_size, short_side_size=short_side_size,
+            new_height=new_height, new_width=new_width, keep_aspect_ratio=keep_aspect_ratio,
+            num_segment=num_segment, num_crop=num_crop, test_num_segment=test_num_segment, 
+            test_num_crop=test_num_crop, args=args, file_ext=file_ext, task='gaze_regression'
+        )
+        self.predict_last_frame = predict_last_frame
+
+    def load_video(self, sample, sample_rate_scale=1):
+        """Load sequential frames for Gaze360"""
+        fname = sample
+        
+        if not os.path.exists(fname):
+            print(f"file does not exist: {fname}")
+            return []
+        
+        # Directory case - load sequential frames
+        try:
+            vr = VideoReaderGaze360(fname, file_ext=self.file_ext, clip_len=self.clip_len)
+
+            buffer = vr.load_clip()
+                
+            # if self.mode == 'train':
+            #     # Random sampling for training
+            #     start_idx = np.random.randint(0, max(1, len(vr)))
+            #     buffer = vr.load_clip(start_idx)
+            # else:
+            #     # Use middle clip for validation/test
+            #     start_idx = len(vr) // 2 if len(vr) > 0 else 0
+            #     buffer = vr.load_clip(start_idx)
+                
+                
+            return buffer
+            
+        except Exception as e:
+            print(f"Error loading Gaze360 video from {fname}: {e}")
+            return []
+
+    def __getitem__(self, index):
+        if self.mode == 'train':
+            args = self.args
+            sample = self.dataset_samples[index]
+            # print(f"Loading training sample {index}: {sample}")
+            
+            try:
+                buffer = self.load_video(sample, sample_rate_scale=1)
+            except Exception as e:
+                print(f"Error loading video {sample}: {e}")
+                # Return a random sample instead
+                index = np.random.randint(self.__len__())
+                return self.__getitem__(index)
+                
+            if len(buffer) == 0:
+                # Return a random sample instead
+                index = np.random.randint(self.__len__())
+                return self.__getitem__(index)
+
+            # Apply resize transformation
+            # print(f"Loaded {len(buffer)} frames for sample {sample}")
+            buffer = self.data_resize(buffer)
+            
+            # # debug 
+            # import matplotlib.pyplot as plt
+            # show_img = np.array(buffer[-1])
+            # show_lbl = self.label_array[index]
+            # show_name = sample
+            # plt.imshow(show_img)
+            # # plt.text(0, 0, f"Label: {show_lbl}, Name: {show_name}", color='black', fontsize=12)
+            # plt.title(f"Label: {show_lbl}, Name: {show_name}")
+            # plt.axis('off')
+            # # plt.show()
+            # plt.savefig(f"debug/debug_{index}.png", bbox_inches='tight', pad_inches=0.1)
+            # [checked, correct, BUT NOT NORMALIZED], done in _aug_frame
+            
+            # print(f"After resizing, buffer length: {len(buffer)}")
+            
+            # Apply data augmentation
+            if args.num_sample > 1:
+                frame_list = []
+                label_list = []
+                index_list = []
+                for _ in range(args.num_sample):
+                    new_frames = self._aug_frame(buffer, args)
+                    label = self.label_array[index]
+                    frame_list.append(new_frames)
+                    label_list.append(label)
+                    index_list.append(index)
+                return frame_list, label_list, index_list, {}
+            else:
+                buffer = self._aug_frame(buffer, args)
+
+            # Return 16 frames with last frame's gaze angles
+            return buffer, self.label_array[index], index, {}
+
+        elif self.mode == 'validation':
+            sample = self.dataset_samples[index]
+            buffer = self.load_video(sample)
+            
+            if len(buffer) == 0:
+                print(f"Warning: Empty buffer for validation sample {sample}")
+                # Create dummy data
+                dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
+                buffer = [dummy_img] * self.clip_len
+                
+            buffer = self.data_transform(buffer)
+            return buffer, self.label_array[index], sample
+
+        elif self.mode == 'test':
+            sample = self.test_dataset[index]
+            chunk_nb, split_nb = self.test_seg[index]
+            buffer = self.load_video(sample)
+
+            if len(buffer) == 0:
+                print(f"Warning: Empty buffer for test sample {sample}")
+                dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
+                buffer = [dummy_img] * self.clip_len
+
+            buffer = self.data_resize(buffer)
+            if isinstance(buffer, list):
+                buffer = np.stack(buffer, 0)
+
+            # For Gaze360, we don't need temporal and spatial cropping like action recognition
+            # Just apply the standard transform
+            buffer = self.data_transform(buffer)
+            return buffer, self.test_label_array[index], sample, chunk_nb, split_nb
+        else:
+            raise NameError('mode {} unknown'.format(self.mode))
 
 
 def spatial_sampling(
