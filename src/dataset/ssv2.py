@@ -2,12 +2,12 @@ import os
 import numpy as np
 import torch
 from torchvision import transforms
-from random_erasing import RandomErasing
+from src.dataset.augment.random_erasing import RandomErasing
 import warnings
 from decord import VideoReader, cpu
 from torch.utils.data import Dataset
-import video_transforms as video_transforms 
-import volume_transforms as volume_transforms
+import src.dataset.augment.video_transforms as video_transforms 
+import src.dataset.augment.volume_transforms as volume_transforms
 
 
 class SSVideoClsDataset(Dataset):

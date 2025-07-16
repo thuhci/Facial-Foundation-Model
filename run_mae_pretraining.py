@@ -8,12 +8,12 @@ import json
 import os
 from pathlib import Path
 from timm.models import create_model
-from optim_factory import create_optimizer
-from datasets import build_pretraining_dataset
-from engine_for_pretraining import train_one_epoch
-from utils import NativeScalerWithGradNormCount as NativeScaler
-import utils
-import modeling_pretrain
+from src.optim.optim_factory import create_optimizer
+from src.dataset.datasets import build_pretraining_dataset
+from src.engine_for_pretraining import train_one_epoch
+from src.utils import NativeScalerWithGradNormCount as NativeScaler
+from src import utils
+from src.models import modeling_pretrain
 
 
 def get_args():
