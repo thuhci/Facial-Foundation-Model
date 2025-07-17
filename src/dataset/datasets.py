@@ -1,9 +1,9 @@
 import os
 from torchvision import transforms
-from transforms import *
-from masking_generator import TubeMaskingGenerator, TubeWindowMaskingGenerator
-from kinetics import VideoClsDataset, VideoMAE, VideoClsDatasetFrame
-from ssv2 import SSVideoClsDataset
+from src.dataset.transforms import *
+from src.dataset.masking_generator import TubeMaskingGenerator, TubeWindowMaskingGenerator
+from src.dataset.kinetics import VideoClsDataset, VideoMAE, VideoClsDatasetFrame
+from src.dataset.ssv2 import SSVideoClsDataset
 
 
 class DataAugmentationForVideoMAE(object):

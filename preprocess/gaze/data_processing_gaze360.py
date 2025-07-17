@@ -12,10 +12,10 @@ import time
 
 
 
-root = "Gaze360/imgs"
-out_root = "Gaze360/normalized_imgs"
-txt_root = "Gaze360/gaze360/code"
-out_txt_root = "Gaze360/lbls"
+root = "../Gaze360/imgs"
+out_root = "../Gaze360/normalized_imgs"
+txt_root = "../Gaze360/gaze360/code"
+out_txt_root = "../Gaze360/lbls"
 
 detector = MTCNN(keep_all=False, post_process=False, min_face_size=80, device='cpu')
 
