@@ -1,0 +1,134 @@
+# Gaze360 finetuning configuration
+# This file contains all the parameters for training the gaze estimation model
+
+model:
+  name: vit_base_dim512_no_depth_patch16_160
+  tubelet_size: 2
+  input_size: 160
+  drop: 0.0
+  attn_drop_rate: 0.0
+  drop_path: 0.1
+  depth: 16
+  
+  # Attention configuration
+  attn_type: local_global
+  lg_region_size: [2, 2, 10]
+  lg_first_attn_type: self
+  lg_third_attn_type: cross
+  lg_attn_param_sharing_first_third: false
+  lg_attn_param_sharing_all: false
+  lg_classify_token_type: org
+  lg_no_second: false
+  lg_no_third: false
+
+data:
+  dataset_name: Gaze360
+  data_path: saved/data/gaze360
+  eval_data_path: null
+  num_classes: 2
+  num_segments: 1
+  num_frames: 16
+  sampling_rate: 4
+  imagenet_default_mean_and_std: true
+  
+  # Data loading
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+augmentation:
+  # Basic augmentation
+  color_jitter: 0.4
+  train_interpolation: bicubic
+  num_sample: 1  # Disabled for gaze estimation
+  
+  # Auto augmentation (disabled for gaze)
+  auto_augment: null
+  
+  # Mixup augmentation (disabled for gaze estimation)
+  mixup: 0.0
+  cutmix: 0.0
+  cutmix_minmax: null
+  mixup_prob: 1.0
+  mixup_switch_prob: 0.5
+  mixup_mode: batch
+  
+  # Random erase augmentation
+  random_erase_prob: 0.25
+  random_erase_mode: pixel
+  random_erase_count: 1
+  random_erase_split: false
+  
+  # Label smoothing (disabled for regression)
+  label_smoothing: 0.0
+
+optimization:
+  optimizer: adamw
+  lr: 1e-3
+  min_lr: 1e-6
+  warmup_lr: 1e-6
+  weight_decay: 0.05
+  weight_decay_end: null
+  
+  # Learning rate schedule
+  warmup_epochs: 5
+  warmup_steps: -1
+  
+  # Optimizer specific
+  opt_eps: 1e-8
+  opt_betas: [0.9, 0.999]
+  momentum: 0.9
+  
+  # Gradient clipping
+  clip_grad: null
+  layer_decay: 0.75
+
+training:
+  epochs: 50
+  start_epoch: 0
+  update_freq: 1
+  save_ckpt_freq: 1
+  
+  # Model EMA
+  model_ema: false
+  model_ema_decay: 0.9999
+  model_ema_force_cpu: false
+  
+  # Evaluation
+  disable_eval_during_finetuning: false
+  eval_only: false
+  dist_eval: false
+  
+  # Checkpointing
+  save_ckpt: true
+  auto_resume: true
+  resume: ''
+  finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
+  
+  # Validation metric
+  val_metric: acc1
+
+gaze:
+  # L2CS configuration (advanced gaze estimation method)
+  use_l2cs: false  # Set to true for L2CS method
+  num_bins: 90
+  alpha_reg: 1.0
+  bin_width: 2.0
+
+system:
+  device: cuda
+  seed: 0
+  output_dir: ./output/gaze360_finetune_yaml_config
+  log_dir: null
+  
+  # Distributed training
+  world_size: 1
+  local_rank: -1
+  dist_on_itp: false
+  dist_url: env://
+  
+  # DeepSpeed (advanced optimization)
+  enable_deepspeed: false
+  
+  # Features
+  save_feature: false

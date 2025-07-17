@@ -7,14 +7,14 @@
 Dynamic Facial Expression Recognition (DFER) is facing **supervised dillema**. On the one hand, current efforts in DFER focus on developing *various* deep supervised models, but only achieving *incremental* progress which is mainly attributed to the *longstanding lack* of large-scale high-quality datasets. On the other hand, due to the *ambiguity* and *subjectivity* in facial expression perception, acquiring large-scale high-quality DFER samples is pretty *time-consuming* and *labor-intensive*. Considering that there are massive unlabeled facial videos on the Internet, this work aims to **explore a new way** (i.e., self-supervised learning) which can fully exploit large-scale *unlabeled* data to largely advance the development of DFER.
 
 <p align="center">
-  <img src="figs/Overview.png" width=50%> <br>
+  <img src="docs/figs/Overview.png" width=50%> <br>
   Overview of our MAE-DFER.
 </p>
 
 Inspired by recent success of VideoMAE, MAE-DFER makes an early attempt to devise a novel masked autoencoder based self-supervised framework for DFER. It improves VideoMAE by developing an *efficient* LGI-Former as the encoder and introducing *joint* masked appearance and motion modeling. With these two core designs, MAE-DFER *largely* reduces the computational cost (about 38% FLOPs) during fine-tuning while having comparable or even *better* performance.
 
 <p align="center">
-  <img src="figs/LGI-Former.png" width=100%> <br>
+  <img src="docs/figs/LGI-Former.png" width=100%> <br>
   The architecture of LGI-Former.
 </p>
 <!-- ![LGI-Former](figs/LGI-Former.png) -->

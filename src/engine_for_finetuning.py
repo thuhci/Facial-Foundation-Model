@@ -18,7 +18,6 @@ def train_class_batch(model, samples, target, criterion, args=None):
 
 def train_gaze_batch(model, samples, target, criterion, args=None):
     """专门用于gaze回归任务的训练批次"""
-    # 限制输入值范围
     outputs = model(samples)
     
     target_angles = utils.gaze3d_to_gaze2d(target)

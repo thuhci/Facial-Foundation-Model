@@ -398,7 +398,7 @@ def build_dataset(is_train, test_mode, args):
             mode = 'validation'
             anno_path = os.path.join(args.data_path, 'val.csv')
 
-        from kinetics import VideoClsDatasetGaze360
+        from src.dataset.kinetics import VideoClsDatasetGaze360
         dataset = VideoClsDatasetGaze360(
             anno_path=anno_path,
             data_path='/',
