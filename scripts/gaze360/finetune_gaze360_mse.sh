@@ -13,6 +13,7 @@ python run_gaze360_finetuning.py \
     --cutmix 0 \
     --num_sample 1 \
     --warmup_epochs 2 \
+    --save_ckpt_freq 1 \
     --world_size 3 \
     # --device cpu \
     # --enable_deepspeed

@@ -1,6 +1,7 @@
 import os
 import numpy as np
-from numpy.lib.function_base import disp
+# from numpy.lib.function_base import disp # not in thieversion
+
 import torch
 import decord
 from PIL import Image
@@ -630,8 +631,9 @@ class VideoReaderGaze360:
         self.base_frame = base_frame.split('/')[-1].split('.')[0]  # get the base frame name without extension
         self.base_frame = int(self.base_frame)  # convert to integer if it's a number
         # print(f"==> Note: VideoReaderGaze360 initialized with base_frame: {self.base_frame}, file_ext: {file_ext}, clip_len: {clip_len}")
-        self.video_dir = base_frame.split('/')[:-1]
-        self.video_dir = os.path.join(*self.video_dir)  # join path components
+        # self.video_dir = base_frame.split('/')[:-1]
+        # self.video_dir = os.path.join(*self.video_dir)  # join path components
+        self.video_dir = os.path.dirname(base_frame)  # get the directory of the base frame
         # print(f"==> Note: VideoReaderGaze360 video_dir: {self.video_dir}")
         self.file_ext = file_ext
         self.clip_len = clip_len
