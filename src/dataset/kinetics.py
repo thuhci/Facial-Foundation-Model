@@ -8,6 +8,7 @@ from PIL import Image
 from torchvision import transforms
 from src.dataset.augment.random_erasing import RandomErasing
 import warnings
+from src.utils.config import get_cfg
 from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 import src.dataset.augment.video_transforms as video_transforms 
@@ -22,7 +23,7 @@ class VideoClsDataset(Dataset):
     def __init__(self, anno_path, data_path, mode='train', clip_len=8,
                  frame_sample_rate=2, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3):
         self.anno_path = anno_path
         self.data_path = data_path
         self.mode = mode
@@ -37,12 +38,12 @@ class VideoClsDataset(Dataset):
         self.test_num_segment = test_num_segment
         self.num_crop = num_crop
         self.test_num_crop = test_num_crop
-        self.args = args
         self.aug = False
         self.rand_erase = False
         if self.mode in ['train']:
             self.aug = True
-            if self.args.reprob > 0:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.RANDOM_ERASE_PROB > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
@@ -85,7 +86,6 @@ class VideoClsDataset(Dataset):
 
     def __getitem__(self, index):
         if self.mode == 'train':
-            args = self.args 
             scale_t = 1
 
             sample = self.dataset_samples[index]
@@ -97,19 +97,20 @@ class VideoClsDataset(Dataset):
                     sample = self.dataset_samples[index]
                     buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t)
 
-            if args.num_sample > 1:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.NUM_SAMPLE > 1:
                 frame_list = []
                 label_list = []
                 index_list = []
-                for _ in range(args.num_sample):
-                    new_frames = self._aug_frame(buffer, args)
+                for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
+                    new_frames = self._aug_frame(buffer)
                     label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, args)
+                buffer = self._aug_frame(buffer)
             
             return buffer, self.label_array[index], index, {}
 
@@ -164,13 +165,14 @@ class VideoClsDataset(Dataset):
     def _aug_frame(
         self,
         buffer,
-        args,
     ):
+        cfg = get_cfg()
 
+        # print("[DEBUG] params in creat_random_augment: ", cfg.AUGMENTATION.AUTO_AUGMENT, cfg.AUGMENTATION.TRAIN_INTERPOLATION)
         aug_transform = video_transforms.create_random_augment(
             input_size=(self.crop_size, self.crop_size),
-            auto_augment=args.aa,
-            interpolation=args.train_interpolation,
+            auto_augment=cfg.AUGMENTATION.AUTO_AUGMENT,
+            interpolation=cfg.AUGMENTATION.TRAIN_INTERPOLATION,
         )
 
         buffer = [
@@ -201,7 +203,7 @@ class VideoClsDataset(Dataset):
             min_scale=256,
             max_scale=320,
             crop_size=self.crop_size,
-            random_horizontal_flip=False if args.data_set == 'SSV2' else True ,
+            random_horizontal_flip=False if cfg.DATA.DATASET_NAME == 'SSV2' else True ,
             inverse_uniform_sampling=False,
             aspect_ratio=asp,
             scale=scl,
@@ -210,10 +212,10 @@ class VideoClsDataset(Dataset):
 
         if self.rand_erase:
             erase_transform = RandomErasing(
-                args.reprob,
-                mode=args.remode,
-                max_count=args.recount,
-                num_splits=args.recount,
+                cfg.AUGMENTATION.RANDOM_ERASE_PROB,
+                mode=cfg.AUGMENTATION.RANDOM_ERASE_MODE,
+                max_count=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
+                num_splits=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
                 device="cpu",
             )
             buffer = buffer.permute(1, 0, 2, 3)
@@ -292,7 +294,7 @@ class VideoClsDatasetFrame(Dataset):
     def __init__(self, anno_path, data_path, mode='train', clip_len=8,
                  frame_sample_rate=2, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, args=None,
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,
                  file_ext='jpg', task='classification', gaze_frame_mode='last'):
         self.anno_path = anno_path
         self.data_path = data_path
@@ -308,7 +310,6 @@ class VideoClsDatasetFrame(Dataset):
         self.test_num_segment = test_num_segment
         self.num_crop = num_crop
         self.test_num_crop = test_num_crop
-        self.args = args
 
         # me: new added (for MAFW with .png file)
         self.file_ext = file_ext
@@ -319,7 +320,8 @@ class VideoClsDatasetFrame(Dataset):
         self.rand_erase = False
         if self.mode in ['train']:
             self.aug = True
-            if self.args.reprob > 0:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.RANDOM_ERASE_PROB > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
@@ -382,7 +384,6 @@ class VideoClsDatasetFrame(Dataset):
 
     def __getitem__(self, index):
         if self.mode == 'train':
-            args = self.args
             scale_t = 1
 
             sample = self.dataset_samples[index]
@@ -402,19 +403,20 @@ class VideoClsDatasetFrame(Dataset):
             # me: new added for less compute
             buffer = self.data_resize(buffer)
 
-            if args.num_sample > 1:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.NUM_SAMPLE > 1:
                 frame_list = []
                 label_list = []
                 index_list = []
-                for _ in range(args.num_sample):
-                    new_frames = self._aug_frame(buffer, args)
+                for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
+                    new_frames = self._aug_frame(buffer, cfg)
                     label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, args)
+                buffer = self._aug_frame(buffer, cfg)
 
             return buffer, self.label_array[index], index, {}
 
@@ -474,13 +476,15 @@ class VideoClsDatasetFrame(Dataset):
     def _aug_frame(
             self,
             buffer,
-            args,
     ):
+        cfg = get_cfg()
+        
+        # print("[DEBUG] params in creat_random_augment: ", cfg.AUGMENTATION.AUTO_AUGMENT, cfg.AUGMENTATION.TRAIN_INTERPOLATION)
 
         aug_transform = video_transforms.create_random_augment(
             input_size=(self.crop_size, self.crop_size),
-            auto_augment=args.aa,
-            interpolation=args.train_interpolation,
+            auto_augment=cfg.AUGMENTATION.AUTO_AUGMENT,
+            interpolation=cfg.AUGMENTATION.TRAIN_INTERPOLATION,
         )
 
         # me: buffer is already a list of PIL Images (using VideoReaderFrame)
@@ -514,7 +518,7 @@ class VideoClsDatasetFrame(Dataset):
             min_scale=256,
             max_scale=320,
             crop_size=self.crop_size,
-            random_horizontal_flip=False if args.data_set == 'SSV2' else True,
+            random_horizontal_flip=False if cfg.DATA.DATASET_NAME == 'SSV2' else True,
             inverse_uniform_sampling=False,
             aspect_ratio=asp,
             scale=scl,
@@ -523,10 +527,10 @@ class VideoClsDatasetFrame(Dataset):
 
         if self.rand_erase:
             erase_transform = RandomErasing(
-                args.reprob,
-                mode=args.remode,
-                max_count=args.recount,
-                num_splits=args.recount,
+                cfg.AUGMENTATION.RANDOM_ERASE_PROB,
+                mode=cfg.AUGMENTATION.RANDOM_ERASE_MODE,
+                max_count=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
+                num_splits=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
                 device="cpu",
             )
             buffer = buffer.permute(1, 0, 2, 3)
@@ -688,7 +692,7 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
     def __init__(self, anno_path, data_path, mode='train', clip_len=16,
                  frame_sample_rate=1, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, args=None,
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, 
                  file_ext='jpg', predict_last_frame=True):
         # Initialize parent class with regression task
         super().__init__(
@@ -696,7 +700,7 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
             frame_sample_rate=frame_sample_rate, crop_size=crop_size, short_side_size=short_side_size,
             new_height=new_height, new_width=new_width, keep_aspect_ratio=keep_aspect_ratio,
             num_segment=num_segment, num_crop=num_crop, test_num_segment=test_num_segment, 
-            test_num_crop=test_num_crop, args=args, file_ext=file_ext, task='gaze_regression'
+            test_num_crop=test_num_crop, file_ext=file_ext, task='gaze_regression'
         )
         self.predict_last_frame = predict_last_frame
 
@@ -731,8 +735,9 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
             return []
 
     def __getitem__(self, index):
+        cfg = get_cfg()
         if self.mode == 'train':
-            args = self.args
+
             sample = self.dataset_samples[index]
             # print(f"Loading training sample {index}: {sample}")
             
@@ -769,19 +774,22 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
             # print(f"After resizing, buffer length: {len(buffer)}")
             
             # Apply data augmentation
-            if args.num_sample > 1:
+            
+            # print("[DEBUG] in get ittem" )
+            
+            if cfg.AUGMENTATION.NUM_SAMPLE > 1:
                 frame_list = []
                 label_list = []
                 index_list = []
-                for _ in range(args.num_sample):
-                    new_frames = self._aug_frame(buffer, args)
+                for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
+                    new_frames = self._aug_frame(buffer)
                     label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, args)
+                buffer = self._aug_frame(buffer)
 
             # Return 16 frames with last frame's gaze angles
             return buffer, self.label_array[index], index, {}

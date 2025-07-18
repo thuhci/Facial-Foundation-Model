@@ -633,6 +633,7 @@ def create_random_augment(
             of operations to apply).
         interpolation: Interpolation method.
     """
+    # print("[IN CREATE_RANDOM_AUGMENT] input_size: ", input_size, " auto_augment: ", auto_augment, " interpolation: ", interpolation)
     if isinstance(input_size, tuple):
         img_size = input_size[-2:]
     else:
@@ -651,6 +652,7 @@ def create_random_augment(
             return transforms.Compose(
                 [rand_augment_transform(auto_augment, aa_params)]
             )
+    # print("[before not implemented] input_size: ", input_size, " auto_augment: ", auto_augment, " interpolation: ", interpolation)
     raise NotImplementedError
 
 

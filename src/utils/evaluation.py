@@ -7,7 +7,9 @@ import os
 import pickle
 import numpy as np
 from scipy.special import softmax
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Union
+
+from src.utils.config import get_cfg
 
 
 def compute_video(lst: List[Any]) -> List[Union[int, float]]:
@@ -29,19 +31,22 @@ def compute_video(lst: List[Any]) -> List[Union[int, float]]:
     return [pred, top1, top5, int(label)]
 
 
-def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: bool = False) -> Tuple[float, float, Dict[str, List]]:
+def merge_distributed_results(eval_path: str, num_tasks: int, best: bool = False) -> Tuple[float, float, Dict[str, List]]:
     """
     Merge results from distributed evaluation.
     
     Args:
         eval_path: Path to evaluation results
         num_tasks: Number of distributed tasks
-        args: Configuration arguments
+        args: Configuration arguments (for backward compatibility)
         best: Whether to use best checkpoint results
         
     Returns:
         Tuple of (final_top1, final_top5, prediction_dict)
     """
+    # Use global config if args is not provided
+    cfg = get_cfg()
+    
     dict_feats = {}
     dict_label = {}
     dict_pos = {}
@@ -59,7 +64,7 @@ def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: b
             line = line.strip()
             name = line.split('[')[0]
             
-            if args and args.data_set == 'Gaze360':
+            if cfg.DATA.DATASET_NAME == 'Gaze360':
                 # Regression task parsing
                 parts = line.split(']')
                 label_str = parts[1].split(' ')[1]
@@ -95,7 +100,7 @@ def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: b
             dict_label[name] = label
 
         # Load saved features if available
-        if hasattr(args, 'save_feature') and args.save_feature:
+        if cfg.SYSTEM.SAVE_FEATURE:
             feature_file = file.replace(file[-4:], '_feature.pkl')
             if os.path.exists(feature_file):
                 saved_features = pickle.load(open(feature_file, 'rb'))
@@ -134,7 +139,7 @@ def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: b
     for i, item in enumerate(dict_feats):
         input_lst.append([i, item, dict_feats[item], dict_label[item]])
         
-        if args and args.data_set == 'Gaze360':
+        if cfg.DATA.DATASET_NAME == 'Gaze360':
             # For regression tasks, use mean prediction
             pred = np.mean(dict_feats[item], axis=0)
             pred_dict['pred'].append(pred.tolist() if isinstance(pred, np.ndarray) else pred)
@@ -147,7 +152,7 @@ def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: b
         pred_dict['id'].append(item.strip())
 
     # Compute accuracy (only for classification tasks)
-    if args and args.data_set == 'Gaze360':
+    if cfg.DATA.DATASET_NAME == 'Gaze360':
         # For regression tasks, we don't compute top1/top5 accuracy
         final_top1 = 0.0
         final_top5 = 0.0
@@ -159,13 +164,13 @@ def merge_distributed_results(eval_path: str, num_tasks: int, args=None, best: b
         final_top1, final_top5 = np.mean(top1), np.mean(top5)
 
     # Save aggregated features if requested
-    if hasattr(args, 'save_feature') and args.save_feature and overall_saved_features:
+    if cfg.SYSTEM.SAVE_FEATURE and overall_saved_features:
         # Get average feature and prediction
         for sample_id in overall_saved_features.keys():
             overall_saved_features[sample_id]['feature'] = np.mean(
                 overall_saved_features[sample_id]['feature'], axis=0
             )
-            if args.data_set != 'Gaze360':
+            if cfg.DATA.DATASET_NAME != 'Gaze360':
                 overall_saved_features[sample_id]['pred'] = int(
                     np.argmax(np.mean(overall_saved_features[sample_id]['prob'], axis=0))
                 )
@@ -187,13 +192,15 @@ def save_evaluation_results(file_path: str, results: Dict[str, List], args=None)
     Args:
         file_path: Path to save results
         results: Dictionary containing evaluation results
-        args: Configuration arguments
+        args: Configuration arguments (for backward compatibility)
     """
+    cfg = get_cfg()
+    
     if not os.path.exists(file_path):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
     with open(file_path, 'w') as f:
-        if args and args.data_set == 'Gaze360':
+        if cfg.DATA.DATASET_NAME == 'Gaze360':
             # For regression tasks, save mean angular error
             f.write("Mean Angular Error\n")
             for i, (vid_id, label, pred) in enumerate(zip(results['id'], results['label'], results['pred'])):

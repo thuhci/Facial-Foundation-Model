@@ -21,6 +21,18 @@ _C.MODEL.DROP = 0.0
 _C.MODEL.ATTN_DROP_RATE = 0.0
 _C.MODEL.DROP_PATH = 0.1
 _C.MODEL.DEPTH = None
+_C.MODEL.USE_CHECKPOINT = False
+_C.MODEL.USE_MEAN_POOLING = False
+_C.MODEL.INIT_SCALE = 0.001
+_C.MODEL.WITH_CP = False
+_C.MODEL.COS_ATTN = False
+
+# Masking configuration
+_C.MODEL.MASK_TYPE = 'tube'
+_C.MODEL.WINDOW_SIZE = [8, 14, 14]
+_C.MODEL.MASK_RATIO = 0.75
+_C.MODEL.PART_WIN_SIZE = [8, 7, 7]
+_C.MODEL.PART_APPLY_SYMMETRY = True
 
 # Attention configuration
 _C.MODEL.ATTN_TYPE = 'local_global'
@@ -46,6 +58,9 @@ _C.DATA.IMAGENET_DEFAULT_MEAN_AND_STD = True
 _C.DATA.BATCH_SIZE = 64
 _C.DATA.NUM_WORKERS = 4
 _C.DATA.PIN_MEMORY = True
+_C.DATA.TEST_NUM_SEGMENT = 5
+_C.DATA.TEST_NUM_CROP = 3
+_C.DATA.SHORT_SIDE_SIZE = 320
 
 # Augmentation configuration
 _C.AUGMENTATION = CN()
@@ -64,10 +79,23 @@ _C.AUGMENTATION.RANDOM_ERASE_MODE = 'pixel'
 _C.AUGMENTATION.RANDOM_ERASE_COUNT = 1
 _C.AUGMENTATION.RANDOM_ERASE_SPLIT = False
 _C.AUGMENTATION.LABEL_SMOOTHING = 0.1
+_C.AUGMENTATION.NO_AUGMENTATION = False
+
+# mixup_fn = Mixup(
+#             mixup_alpha=cfg.AUGMENTATION.MIXUP_ALPHA,
+#             cutmix_alpha=cfg.AUGMENTATION.CUTMIX_ALPHA,
+#             cutmix_minmax=cfg.AUGMENTATION.CUTMIX_MINMAX,
+#             prob=cfg.AUGMENTATION.MIXUP_PROB,
+#             switch_prob=cfg.AUGMENTATION.MIXUP_SWITCH_PROB,
+#             mode=cfg.AUGMENTATION.MIXUP_MODE,
+#             label_smoothing=cfg.AUGMENTATION.SMOOTHING,
+#             num_classes=cfg.MODEL.NUM_CLASSES
+#         )
 
 # Optimization configuration
 _C.OPTIMIZATION = CN()
 _C.OPTIMIZATION.OPTIMIZER = 'adamw'
+_C.OPTIMIZATION.SCHED = 'cosine'
 _C.OPTIMIZATION.LR = 1e-3
 _C.OPTIMIZATION.MIN_LR = 1e-6
 _C.OPTIMIZATION.WARMUP_LR = 1e-6

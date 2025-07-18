@@ -5,3 +5,4 @@ checkpoint/
 imgs/
 Gaze360/
 *.pth
+__pycache__

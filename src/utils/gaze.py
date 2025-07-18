@@ -1,6 +1,7 @@
 import torch
 from typing import Dict, Any
 from torch.utils.data import DataLoader
+from src.utils.config import get_cfg
 
 def spherical_to_cartesian(spherical_coords):
     """将球坐标转换为笛卡尔坐标"""
@@ -107,15 +108,16 @@ def l2cs_loss(pitch_pred, yaw_pred, pitch_target, yaw_target,
     return total_loss, loss_pitch_ce + loss_yaw_ce, loss_pitch_mse + loss_yaw_mse, angular_error
 
 
-def criterion_l2cs(outputs, targets, args):
+def criterion_l2cs(outputs, targets):
+    cfg = get_cfg()
             # 假设 targets 是 3D gaze 向量
     gaze_2d = gaze3d_to_gaze2d(targets)
     pitch_target = gaze_2d[:, 0]
     yaw_target = gaze_2d[:, 1]
     
     # 转换为分类标签
-    pitch_bins = angles_to_bins(pitch_target, args.num_bins, args.bin_width)
-    yaw_bins = angles_to_bins(yaw_target, args.num_bins, args.bin_width)
+    pitch_bins = angles_to_bins(pitch_target, cfg.GAZE.NUM_BINS, cfg.GAZE.BIN_WIDTH)
+    yaw_bins = angles_to_bins(yaw_target, cfg.GAZE.NUM_BINS, cfg.GAZE.BIN_WIDTH)
     
     # 模型输出
     pitch_pred = outputs['pitch']
@@ -123,10 +125,10 @@ def criterion_l2cs(outputs, targets, args):
     
     criterion_mse = torch.nn.MSELoss()
     criterion_ce = torch.nn.CrossEntropyLoss()
-    idx_tensor = torch.arange(0, args.num_bins, device=pitch_bins.device).float()
+    idx_tensor = torch.arange(0, cfg.GAZE.NUM_BINS, device=pitch_bins.device).float()
     
     return l2cs_loss(pitch_pred, yaw_pred, pitch_target, yaw_target,
                     pitch_bins, yaw_bins, idx_tensor,
-                    criterion_ce, criterion_mse, args.alpha_reg)
+                    criterion_ce, criterion_mse, cfg.GAZE.ALPHA_REG)
     
     

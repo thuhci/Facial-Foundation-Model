@@ -5,7 +5,8 @@ import torch.nn.functional as F
 
 from functools import partial
 
-from src.models.layers import Block, _cfg, PatchEmbed, get_sinusoid_encoding_table, LGBlock
+from src.models.layers import Block, PatchEmbed, get_sinusoid_encoding_table, LGBlock
+from src.models.ViT import _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from einops import rearrange, repeat

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from timm.models.layers import drop_path, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 from einops import rearrange, repeat
-
+from src.models.layers import PatchEmbed, get_sinusoid_encoding_table, LGBlock
 
 def _cfg(url='', **kwargs):
     return {

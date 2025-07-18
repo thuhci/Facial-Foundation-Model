@@ -8,6 +8,7 @@ from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 import src.dataset.augment.video_transforms as video_transforms 
 import src.dataset.augment.volume_transforms as volume_transforms
+from src.utils.config import get_cfg
 
 
 class SSVideoClsDataset(Dataset):
@@ -16,7 +17,7 @@ class SSVideoClsDataset(Dataset):
     def __init__(self, anno_path, data_path, mode='train', clip_len=8,
                 crop_size=224, short_side_size=256, new_height=256,
                 new_width=340, keep_aspect_ratio=True, num_segment=1,
-                num_crop=1, test_num_segment=10, test_num_crop=3, args=None):
+                num_crop=1, test_num_segment=10, test_num_crop=3):
         self.anno_path = anno_path
         self.data_path = data_path
         self.mode = mode
@@ -30,12 +31,12 @@ class SSVideoClsDataset(Dataset):
         self.test_num_segment = test_num_segment
         self.num_crop = num_crop
         self.test_num_crop = test_num_crop
-        self.args = args
         self.aug = False
         self.rand_erase = False
         if self.mode in ['train']:
             self.aug = True
-            if self.args.reprob > 0:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.RANDOM_ERASE_PROB > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
@@ -78,7 +79,6 @@ class SSVideoClsDataset(Dataset):
 
     def __getitem__(self, index):
         if self.mode == 'train':
-            args = self.args 
             scale_t = 1
 
             sample = self.dataset_samples[index]
@@ -90,19 +90,20 @@ class SSVideoClsDataset(Dataset):
                     sample = self.dataset_samples[index]
                     buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t)
 
-            if args.num_sample > 1:
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.NUM_SAMPLE > 1:
                 frame_list = []
                 label_list = []
                 index_list = []
-                for _ in range(args.num_sample):
-                    new_frames = self._aug_frame(buffer, args)
+                for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
+                    new_frames = self._aug_frame(buffer)
                     label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, args)
+                buffer = self._aug_frame(buffer)
             
             return buffer, self.label_array[index], index, {}
 
@@ -155,13 +156,14 @@ class SSVideoClsDataset(Dataset):
     def _aug_frame(
         self,
         buffer,
-        args,
     ):
+        
+        cfg = get_cfg()
 
         aug_transform = video_transforms.create_random_augment(
             input_size=(self.crop_size, self.crop_size),
-            auto_augment=args.aa,
-            interpolation=args.train_interpolation,
+            auto_augment=cfg.AUGMENTATION.AUTO_AUGMENT,
+            interpolation=cfg.AUGMENTATION.TRAIN_INTERPOLATION,
         )
 
         buffer = [
@@ -192,7 +194,7 @@ class SSVideoClsDataset(Dataset):
             min_scale=256,
             max_scale=320,
             crop_size=self.crop_size,
-            random_horizontal_flip=False if args.data_set == 'SSV2' else True,
+            random_horizontal_flip=False if cfg.DATA.DATASET_NAME == 'SSV2' else True,
             inverse_uniform_sampling=False,
             aspect_ratio=asp,
             scale=scl,
@@ -201,10 +203,10 @@ class SSVideoClsDataset(Dataset):
 
         if self.rand_erase:
             erase_transform = RandomErasing(
-                args.reprob,
-                mode=args.remode,
-                max_count=args.recount,
-                num_splits=args.recount,
+                cfg.AUGMENTATION.RANDOM_ERASE_PROB,
+                mode=cfg.AUGMENTATION.RANDOM_ERASE_MODE,
+                max_count=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
+                num_splits=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
                 device="cpu",
             )
             buffer = buffer.permute(1, 0, 2, 3)

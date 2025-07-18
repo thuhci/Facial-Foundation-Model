@@ -7,8 +7,8 @@ import torch.distributed as dist
 from tensorboardX import SummaryWriter
 from typing import Dict, List, Tuple, Any, Union
 import datetime
-from src.utils.distributed import is_dist_avail_and_initialized
-
+from src.utils.utils import is_dist_avail_and_initialized
+import time
 
 
 class SmoothedValue(object):

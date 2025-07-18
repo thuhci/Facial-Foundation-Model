@@ -21,27 +21,30 @@ sys.path.insert(0, str(Path(__file__).parent))
 from timm.models import create_model
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.scheduler import create_scheduler
-from timm.optim import create_optimizer
+from src.optim.optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
+
 from timm.utils import ModelEma
 
 from src.utils.config import get_cfg, merge_config_file, freeze_cfg, load_and_freeze_config
-from src.engine.training_engine import TrainingEngine, ValidationEngine
+from src.engine.train_engine import TrainingEngine
+from src.engine.val_engine import ValidationEngine
 from src.utils.evaluation import merge_distributed_results
 from src.optim.mixup import Mixup
-from src.optim.optim_factory import LayerDecayValueAssigner
+# from src.optim.optim_factory import LayerDecayValueAssigner
 from src.dataset.datasets import build_dataset
 from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
 from src.utils.utils import multiple_samples_collate
+from src.utils.logger import TensorboardLogger
 from src.utils import utils
-from src.models import modeling_finetune
 
+from src.models import ViT, ViT_pretrain, layers
 
 def get_args_parser():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser('Training script with YACS configuration', add_help=False)
     
     # Basic arguments
-    parser.add_argument('--config', default='', type=str, help='Path to YAML config file')
+    parser.add_argument('--config', default='', type=str, help='Path to YAML config file', required=True)
     parser.add_argument('--output_dir', default='./output', type=str, help='Output directory')
     parser.add_argument('--resume', default='', type=str, help='Resume from checkpoint')
     parser.add_argument('--seed', default=0, type=int, help='Random seed')
@@ -58,8 +61,8 @@ def create_data_loaders():
     cfg = get_cfg()
     
     # Create dataset
-    dataset_train = build_dataset(is_train=True, test_mode=False)
-    dataset_val = build_dataset(is_train=False, test_mode=False)
+    dataset_train, nb_classes = build_dataset(is_train=True, test_mode=False)
+    dataset_val, nb_classes = build_dataset(is_train=False, test_mode=False)
     
     # Create data loaders
     if cfg.SYSTEM.DISTRIBUTED:
@@ -75,9 +78,8 @@ def create_data_loaders():
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     
-    # Determine collate function
-    if cfg.DATA.DATASET_NAME in ['Gaze360', 'GazeCapture']:
-        collate_func = multiple_samples_collate
+    if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+        collate_func = partial(multiple_samples_collate, fold=False)
     else:
         collate_func = None
     
@@ -91,6 +93,7 @@ def create_data_loaders():
         drop_last=True,
         collate_fn=collate_func
     )
+    # print(f"Data loader train size: {len(data_loader_train)}")
     
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val,
@@ -101,6 +104,7 @@ def create_data_loaders():
         drop_last=False,
         collate_fn=collate_func
     )
+    # print(f"Data loader val size: {len(data_loader_val)}")
     
     return data_loader_train, data_loader_val
 
@@ -116,34 +120,42 @@ def create_model_from_config():
         model = create_model(
             model_name,
             pretrained=False,
-            num_classes=cfg.MODEL.NUM_CLASSES,
+            num_classes=cfg.DATA.NUM_CLASSES,
             all_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
             tubelet_size=cfg.MODEL.TUBELET_SIZE,
-            drop_rate=cfg.MODEL.DROP_RATE,
-            drop_path_rate=cfg.MODEL.DROP_PATH_RATE,
+            drop_rate=cfg.MODEL.DROP,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
             attn_drop_rate=cfg.MODEL.ATTN_DROP_RATE,
-            use_checkpoint=cfg.MODEL.USE_CHECKPOINT,
+            drop_block_rate=None,
             use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
             init_scale=cfg.MODEL.INIT_SCALE,
-            with_cp=cfg.MODEL.WITH_CP,
-            cos_attn=cfg.MODEL.COS_ATTN,
-            depth=cfg.MODEL.DEPTH
+            attn_type=cfg.MODEL.ATTN_TYPE,
+            lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
+            lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
+            lg_attn_param_sharing_first_third=cfg.MODEL.LG_ATTN_PARAM_SHARING_FIRST_THIRD,
+            lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
+            lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
+            lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
         )
     else:
         model = create_model(
             model_name,
-            pretrained=cfg.MODEL.PRETRAINED,
-            num_classes=cfg.MODEL.NUM_CLASSES,
+            pretrained=False,
+            num_classes=cfg.DATA.NUM_CLASSES,
             all_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
             tubelet_size=cfg.MODEL.TUBELET_SIZE,
-            drop_rate=cfg.MODEL.DROP_RATE,
-            drop_path_rate=cfg.MODEL.DROP_PATH_RATE,
+            drop_rate=cfg.MODEL.DROP,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
             attn_drop_rate=cfg.MODEL.ATTN_DROP_RATE,
-            use_checkpoint=cfg.MODEL.USE_CHECKPOINT,
             use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
             init_scale=cfg.MODEL.INIT_SCALE,
-            with_cp=cfg.MODEL.WITH_CP,
-            cos_attn=cfg.MODEL.COS_ATTN
+            attn_type=cfg.MODEL.ATTN_TYPE,
+            lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
+            lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
+            lg_attn_param_sharing_first_third=cfg.MODEL.LG_ATTN_PARAM_SHARING_FIRST_THIRD,
+            lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
+            lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
+            lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
         )
     
     return model
@@ -162,17 +174,18 @@ def create_optimizer_from_config(model, get_num_layer=None, get_layer_scale=None
         )
     else:
         assigner = None
-    
-    # Create optimizer
+        
+    model_without_ddp = model
+    if cfg.SYSTEM.DISTRIBUTED:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        model_without_ddp = model.module
+    skip_weight_decay_list = model.no_weight_decay()
+    get_num_layer=assigner.get_layer_id if assigner is not None else None,
+    print("get_num_layer", get_num_layer)
     optimizer = create_optimizer(
-        cfg.OPTIMIZATION,
-        model,
-        skip_list=cfg.OPTIMIZATION.SKIP_LIST,
-        get_num_layer=get_num_layer,
-        get_layer_scale=get_layer_scale,
-        filter_bias_and_bn=cfg.OPTIMIZATION.FILTER_BIAS_AND_BN,
-        layer_decay=cfg.OPTIMIZATION.LAYER_DECAY_RATE
-    )
+        model_without_ddp, skip_list=skip_weight_decay_list,
+        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
+        get_layer_scale=assigner.get_scale if assigner is not None else None)
     
     return optimizer
 
@@ -207,17 +220,17 @@ def create_mixup_from_config():
     """Create mixup function from global configuration."""
     cfg = get_cfg()
     
-    mixup_active = cfg.AUGMENTATION.MIXUP_ALPHA > 0 or cfg.AUGMENTATION.CUTMIX_ALPHA > 0
+    mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
     if mixup_active:
         mixup_fn = Mixup(
-            mixup_alpha=cfg.AUGMENTATION.MIXUP_ALPHA,
-            cutmix_alpha=cfg.AUGMENTATION.CUTMIX_ALPHA,
+            mixup_alpha=cfg.AUGMENTATION.MIXUP,
+            cutmix_alpha=cfg.AUGMENTATION.CUTMIX,
             cutmix_minmax=cfg.AUGMENTATION.CUTMIX_MINMAX,
             prob=cfg.AUGMENTATION.MIXUP_PROB,
             switch_prob=cfg.AUGMENTATION.MIXUP_SWITCH_PROB,
             mode=cfg.AUGMENTATION.MIXUP_MODE,
             label_smoothing=cfg.AUGMENTATION.SMOOTHING,
-            num_classes=cfg.MODEL.NUM_CLASSES
+            num_classes=cfg.DATA.NUM_CLASSES
         )
     else:
         mixup_fn = None
@@ -230,7 +243,7 @@ def create_scheduler_from_config(optimizer, num_training_steps_per_epoch):
     cfg = get_cfg()
     
     # Create scheduler
-    lr_scheduler, _ = create_scheduler(cfg.OPTIMIZATION, optimizer)
+    # lr_scheduler, _ = create_scheduler(cfg.OPTIMIZATION, optimizer)
     
     # Create learning rate schedule values
     if cfg.OPTIMIZATION.SCHED == 'cosine':
@@ -256,7 +269,7 @@ def create_scheduler_from_config(optimizer, num_training_steps_per_epoch):
     else:
         wd_schedule_values = None
     
-    return lr_scheduler, lr_schedule_values, wd_schedule_values
+    return lr_schedule_values, wd_schedule_values
 
 
 def main(args):
@@ -285,7 +298,7 @@ def main(args):
     print(cfg)
     
     # Set device
-    device = torch.device(cfg.SYSTEM.GPU if torch.cuda.is_available() else 'cpu')
+    device = torch.device(cfg.SYSTEM.DEVICE if torch.cuda.is_available() else 'cpu')
     
     # Fix seed
     seed = args.seed + utils.get_rank()
@@ -297,6 +310,8 @@ def main(args):
     
     # Create data loaders
     data_loader_train, data_loader_val = create_data_loaders()
+    print(f"Data loader train size: {len(data_loader_train)}")
+    print(f"Data loader val size: {len(data_loader_val)}")
     
     # Create model
     model = create_model_from_config()
@@ -311,17 +326,22 @@ def main(args):
         model_without_ddp = model.module
     
     # Setup training components
-    optimizer = create_optimizer_from_config(model_without_ddp)
+    
+    if cfg.OPTIMIZATION.LAYER_DECAY is not None:
+        get_num_layer = model_without_ddp.get_num_layer if hasattr(model_without_ddp, 'get_num_layer') else None
+        get_layer_scale = model_without_ddp.get_layer_scale if hasattr(model_without_ddp, 'get_layer_scale') else None
+    
+    optimizer = create_optimizer_from_config(model_without_ddp, get_num_layer, get_layer_scale)
     criterion = create_criterion_from_config()
     mixup_fn = create_mixup_from_config()
     
-    # Create model EMA
+    # Create model EM
     model_ema = None
-    if cfg.MODEL.EMA_ENABLED:
+    if cfg.TRAINING.MODELEMA_:
         model_ema = ModelEma(
             model_without_ddp,
-            decay=cfg.MODEL.EMA_DECAY,
-            device='cpu' if cfg.MODEL.EMA_FORCE_CPU else None
+            decay=cfg.TRAINING.MODEL_EMA_DECAY,
+            device='cpu' if cfg.TRAINING.MODEL_EMA_FORCE_CPU else None
         )
     
     # Create loss scaler
@@ -329,22 +349,27 @@ def main(args):
     
     # Create scheduler
     num_training_steps_per_epoch = len(data_loader_train) // cfg.TRAINING.UPDATE_FREQ
-    lr_scheduler, lr_schedule_values, wd_schedule_values = create_scheduler_from_config(
+    lr_schedule_values, wd_schedule_values = create_scheduler_from_config(
         optimizer, num_training_steps_per_epoch
     )
     
     # Create log writer
-    log_writer = utils.TensorboardLogger(
+    log_writer = TensorboardLogger(
         log_dir=cfg.TRAINING.OUTPUT_DIR,
-        distributed_rank=utils.get_rank()
     )
     
     # Create training engine
-    training_engine = TrainingEngine(model, device)
-    training_engine.setup_training_components(
-        optimizer, loss_scaler, criterion, model_ema, mixup_fn, log_writer
-    )
-    
+    training_engine = TrainingEngine(
+        model, 
+        optimizer = optimizer,
+        loss_scaler = loss_scaler,
+        criterion = criterion,
+        model_ema = model_ema,
+        mixup_fn = mixup_fn,
+        log_writer = log_writer,
+        device = device,
+        )
+
     # Create validation engine
     validation_engine = ValidationEngine(model, device)
     
@@ -352,9 +377,9 @@ def main(args):
     if args.resume:
         checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+        if not args.eval and 'optimizer' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             start_epoch = checkpoint['epoch'] + 1
             if 'scaler' in checkpoint:
                 loss_scaler.load_state_dict(checkpoint['scaler'])
@@ -393,7 +418,7 @@ def main(args):
         test_stats = validation_engine.validate(data_loader_val)
         
         # Update learning rate
-        lr_scheduler.step(epoch)
+        # lr_scheduler.step(epoch)
         
         # Save checkpoint
         if cfg.TRAINING.OUTPUT_DIR and utils.is_main_process():
@@ -402,7 +427,7 @@ def main(args):
                 {
                     'model': model_without_ddp.state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
+                    # 'lr_scheduler': lr_scheduler.state_dict(),
                     'epoch': epoch,
                     'scaler': loss_scaler.state_dict(),
                     'config': cfg,

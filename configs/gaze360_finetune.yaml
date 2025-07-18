@@ -8,7 +8,8 @@ model:
   drop: 0.0
   attn_drop_rate: 0.0
   drop_path: 0.1
-  depth: 16
+  use_mean_pooling: True
+  # depth: 16
   
   # Attention configuration
   attn_type: local_global
@@ -43,7 +44,7 @@ augmentation:
   num_sample: 1  # Disabled for gaze estimation
   
   # Auto augmentation (disabled for gaze)
-  auto_augment: null
+  # auto_augment: null
   
   # Mixup augmentation (disabled for gaze estimation)
   mixup: 0.0
@@ -64,9 +65,9 @@ augmentation:
 
 optimization:
   optimizer: adamw
-  lr: 1e-3
-  min_lr: 1e-6
-  warmup_lr: 1e-6
+  lr: 0.001
+  min_lr: 0.000001
+  warmup_lr: 0.000001
   weight_decay: 0.05
   weight_decay_end: null
   
@@ -75,7 +76,7 @@ optimization:
   warmup_steps: -1
   
   # Optimizer specific
-  opt_eps: 1e-8
+  opt_eps: 0.00000001
   opt_betas: [0.9, 0.999]
   momentum: 0.9
   
