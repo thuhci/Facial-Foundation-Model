@@ -29,6 +29,7 @@ class ValidationEngine:
         """
         # Setup criterion
         criterion = self._setup_criterion()
+        cfg = get_cfg()
         
         metric_logger = utils.MetricLogger(delimiter="  ")
         header = 'Val:'
@@ -45,8 +46,8 @@ class ValidationEngine:
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
                 
-                if self.config.data.dataset_name == 'Gaze360':
-                    if self.config.gaze.use_l2cs:
+                if cfg.DATA.DATASET_NAME == 'Gaze360':
+                    if cfg.GAZE.USE_L2CS:
                         # L2CS validation
                         gaze_2d = utils.gaze3d_to_gaze2d(targets)
                         pitch_target = gaze_2d[:, 0]
@@ -70,7 +71,7 @@ class ValidationEngine:
                     acc1, acc5 = utils.accuracy(output, targets, topk=(1, 5))
             
             # Update metrics
-            if self.config.data.dataset_name == 'Gaze360':
+            if cfg.DATA.DATASET_NAME == 'Gaze360':
                 total_angular_error += angular_error * videos.shape[0]
                 num_samples += videos.shape[0]
             
@@ -80,7 +81,7 @@ class ValidationEngine:
             metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         
         # Compute final metrics
-        if self.config.data.dataset_name == 'Gaze360':
+        if cfg.DATA.DATASET_NAME == 'Gaze360' and cfg.GAZE.USE_L2CS:
             mean_angular_error = total_angular_error / num_samples
             metric_logger.meters['mean_angle_error'].update(mean_angular_error, n=num_samples)
             print(f'* Mean Angular Error {mean_angular_error:.4f}° loss {metric_logger.loss.global_avg:.6f}')
@@ -91,9 +92,10 @@ class ValidationEngine:
         return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     
     def _setup_criterion(self):
+        cfg = get_cfg()
         """Setup validation criterion."""
-        if self.config.data.dataset_name == 'Gaze360':
-            if self.config.gaze.use_l2cs:
+        if cfg.DATA.DATASET_NAME == 'Gaze360':
+            if cfg.GAZE.USE_L2CS:
                 # L2CS uses custom criterion
                 return None  # Will be handled in validation loop
             else:

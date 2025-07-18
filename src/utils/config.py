@@ -15,6 +15,8 @@ _C = CN()
 # Model configuration
 _C.MODEL = CN()
 _C.MODEL.NAME = 'vit_base_patch16_224'
+_C.MODEL.MODEL_KEY = 'model|module'  # Key to access model in state_dict
+_C.MODEL.PREFIX = ''
 _C.MODEL.TUBELET_SIZE = 2
 _C.MODEL.INPUT_SIZE = 224
 _C.MODEL.DROP = 0.0
