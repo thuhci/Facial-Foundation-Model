@@ -270,7 +270,8 @@ def save_model(epoch, model, model_without_ddp, optimizer, loss_scaler, model_em
 
             if model_ema is not None:
                 to_save['model_ema'] = get_state_dict(model_ema)
-
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
             save_on_master(to_save, checkpoint_path)
     else:
         client_state = {'epoch': epoch}

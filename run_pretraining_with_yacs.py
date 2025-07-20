@@ -183,7 +183,7 @@ def main(args):
         raise ValueError("Config file is required for pretraining")
     
     # Set output directory
-    cfg.TRAINING.OUTPUT_DIR = args.output_dir
+    cfg.SYSTEM.OUTPUT_DIR = args.output_dir
     
     # Setup distributed training AFTER loading config
     if cfg.SYSTEM.DISTRIBUTED:
@@ -282,7 +282,7 @@ def main(args):
         )
         
         # Save checkpoint
-        if cfg.TRAINING.OUTPUT_DIR:
+        if cfg.SYSTEM.OUTPUT_DIR:
             if (epoch + 1) % cfg.TRAINING.SAVE_CKPT_FREQ == 0 or epoch + 1 == cfg.TRAINING.EPOCHS:
                 utils.utils.save_model(
                     epoch=epoch, model=model, model_without_ddp=model_without_ddp, 
@@ -292,10 +292,10 @@ def main(args):
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      'epoch': epoch, 'n_parameters': n_parameters}
         
-        if cfg.TRAINING.OUTPUT_DIR and utils.utils.is_main_process():
+        if cfg.SYSTEM.OUTPUT_DIR and utils.utils.is_main_process():
             if log_writer is not None:
                 log_writer.flush()
-            with open(os.path.join(cfg.TRAINING.OUTPUT_DIR, "log.txt"), mode="a", encoding="utf-8") as f:
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
     
     total_time = time.time() - start_time

@@ -380,7 +380,7 @@ def main(args):
         cfg = get_cfg()
     
     # Set output directory
-    cfg.TRAINING.OUTPUT_DIR = args.output_dir
+    cfg.SYSTEM.OUTPUT_DIR = args.output_dir
     
     # Setup distributed training AFTER loading config
     print(f"Setting up distributed training with backend: {cfg.SYSTEM.DIST_BACKEND}")
@@ -494,7 +494,7 @@ def main(args):
     
     # Create log writer
     log_writer = TensorboardLogger(
-        log_dir=cfg.TRAINING.OUTPUT_DIR,
+        log_dir=cfg.SYSTEM.OUTPUT_DIR,
     )
     
     # Create training engine
@@ -560,20 +560,21 @@ def main(args):
         # lr_scheduler.step(epoch)
         
         # Save checkpoint
-        if cfg.TRAINING.OUTPUT_DIR and utils.is_main_process():
-            checkpoint_path = os.path.join(cfg.TRAINING.OUTPUT_DIR, f'checkpoint-{epoch}.pth')
-            utils.save_checkpoint(
-                {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    # 'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                    'scaler': loss_scaler.state_dict(),
-                    'config': cfg,
-                    'model_ema': model_ema.state_dict() if model_ema else None,
-                },
-                checkpoint_path
-            )
+        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+            checkpoint_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, f'checkpoint-{epoch}.pth')
+            # utils.save_checkpoint(
+            #     {
+            #         'model': model_without_ddp.state_dict(),
+            #         'optimizer': optimizer.state_dict(),
+            #         # 'lr_scheduler': lr_scheduler.state_dict(),
+            #         'epoch': epoch,
+            #         'scaler': loss_scaler.state_dict(),
+            #         'config': cfg,
+            #         'model_ema': model_ema.state_dict() if model_ema else None,
+            #     },
+            #     checkpoint_path
+            # )
+            utils.save_model(epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema)
         
         # Log stats
         log_stats = {
@@ -583,8 +584,8 @@ def main(args):
             'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
         }
         
-        if cfg.TRAINING.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
-            with open(os.path.join(cfg.TRAINING.OUTPUT_DIR, "log.txt"), "a") as f:
+        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
         
         # Track best accuracy

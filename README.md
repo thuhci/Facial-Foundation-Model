@@ -141,15 +141,27 @@ Place the fine-tuned model in `checkpoint/` to demo.
 The output will be saved in `output/`
 
 
+## New script for pretraining
 
-# To finetune the model for Gaze 360 dataset
+### Dataset preparation
+Please follow the files (e.g., [voxceleb2.py](preprocess/voxceleb2.py)) in [preprocess](preprocess) for data preparation.
 
-## Dataset preparation
+### pretrain
+```bash
+python run_pretraining_with_yacs.py \
+    --config configs/voxceleb2_pretrain.yaml \
+```
+
+
+
+## To finetune the model for Gaze 360 dataset
+
+### Dataset preparation
 1. Download the Gaze 360 dataset from [Gaze 360](https://gaze360.csail.mit.edu/) to the current folder.
 2. Run the [preprocess/data_prepocessing_gaze360.py](./preprocess/data_processing_gaze360.py) script to normalize the dataset and labels.
 3. Run the [preprocess/preprocess_gaze360.py](./preprocess/gaze360.py) to align the dataset labels, which will be generated to `saved/data/gaze360/`.
 
-## Script
+### Script
 ```bash
 python run_finetuning_with_yacs.py  \
  --config configs/gaze360_finetune.yaml  \
