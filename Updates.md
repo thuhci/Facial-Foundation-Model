@@ -14,7 +14,9 @@ python run_finetune_with_yacs.py --config configs/gaze360_finetune.yaml
 
 ## 7.19, 7.20 
 之前的 finetune 的 bug 修了一些。现在 50 epochs 的 err 会降到 30° 左右，并且仍然会慢速下降。
+
 加了 pretraining 的代码，测试了单卡 pretrain 可以运行。
+
 多卡的 nccl 分布式训调试了很久，仍然无法运行，换成了 gloo 后端，可以运行，但是运行极慢。仍待调式。
 
 当前的文件结构:
