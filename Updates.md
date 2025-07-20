@@ -12,7 +12,10 @@ python run_finetune_with_yacs.py --config configs/gaze360_finetune.yaml
 
 但是 loss 没有下降，可能代码还有 bug.
 
-pretrain 以及 多卡训练 还没有做。
+## 7.19, 7.20 
+之前的 finetune 的 bug 修了一些。现在 50 epochs 的 err 会降到 30° 左右，并且仍然会慢速下降。
+加了 pretraining 的代码，测试了单卡 pretrain 可以运行。
+多卡的 nccl 分布式训调试了很久，仍然无法运行，换成了 gloo 后端，可以运行，但是运行极慢。仍待调式。
 
 当前的文件结构:
 ```
@@ -20,9 +23,6 @@ pretrain 以及 多卡训练 还没有做。
 ├── configs
 │   └── gaze360_finetune.yaml                                            # 配置文件可参考该文件
 ├── src
-│   ├── [discarded]engine_for_finetuning.py                              # 之前的代码,用来debug
-│   ├── [discarded]engine_for_finetuning_refactored.py
-│   ├── [discarded]engine_for_pretraining.py
 │   ├── dataset                                       # 数据集相关代码  
 │   │   ├── augment                                   # 数据增强以及transform相关代码,还没完全分好类
 │   │   │   ├── functional.py
@@ -36,6 +36,7 @@ pretrain 以及 多卡训练 还没有做。
 │   │   ├── ssv2.py
 │   │   └── transforms.py
 │   ├── engine                                       # 定义了训练、测试逻辑，为【核心】代码
+│   │   ├── pretrain_engine.py
 │   │   ├── train_engine.py
 │   │   └── val_engine.py
 │   ├── models                                       # 模型架构，仍待进一步重构
@@ -56,5 +57,6 @@ pretrain 以及 多卡训练 还没有做。
 ├── [discarded] run_gaze360_finetuning.py
 ├── [discarded] run_mae_pretraining.py  
 ├── run_finetuning_with_yacs.py                     # 新的 finetune 脚本， 【核心】入口
+├── run_pretraining_with_yacs.py                     # 新的 pretain 脚本， 【核心】入口
 ├── test_config.py                                  # 测试配置文件的脚本
 └── test_yacs_config.py                             # 测试配置文件的脚本，本次重构的【核心】用例在这里面
