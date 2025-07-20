@@ -31,7 +31,7 @@ class ValidationEngine:
         criterion = self._setup_criterion()
         cfg = get_cfg()
         
-        metric_logger = utils.MetricLogger(delimiter="  ")
+        metric_logger = utils.logger.MetricLogger(delimiter="  ")
         header = 'Val:'
         self.model.eval()
         
@@ -47,23 +47,23 @@ class ValidationEngine:
                 output = self.model(videos)
                 
                 if cfg.DATA.DATASET_NAME == 'Gaze360':
-                    if cfg.GAZE.USE_L2CS:
-                        # L2CS validation
-                        gaze_2d = utils.gaze3d_to_gaze2d(targets)
-                        pitch_target = gaze_2d[:, 0]
-                        yaw_target = gaze_2d[:, 1]
+                    # if cfg.GAZE.USE_L2CS:
+                    #     # L2CS validation
+                    #     gaze_2d = utils.gaze.gaze3d_to_gaze2d(targets)
+                    #     pitch_target = gaze_2d[:, 0]
+                    #     yaw_target = gaze_2d[:, 1]
                         
-                        # Compute losses and metrics
-                        loss, angular_error = self._compute_l2cs_validation(output, pitch_target, yaw_target)
-                        acc1 = torch.tensor(0.0)  # Placeholder
-                        acc5 = torch.tensor(0.0)  # Placeholder
-                    else:
-                        # Standard gaze regression
-                        target_angles = utils.gaze3d_to_gaze2d(targets)
-                        loss = criterion(output, target_angles)
-                        angular_error = utils.compute_angular_error(output, target_angles)
-                        acc1 = torch.tensor(0.0)  # Placeholder
-                        acc5 = torch.tensor(0.0)  # Placeholder
+                    #     # Compute losses and metrics
+                    #     loss, angular_error = self._compute_l2cs_validation(output, pitch_target, yaw_target)
+                    #     acc1 = torch.tensor(0.0)  # Placeholder
+                    #     acc5 = torch.tensor(0.0)  # Placeholder
+                    # else:
+                    #     # Standard gaze regression
+                    target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                    loss = criterion(output, target_angles)
+                    angular_error = utils.gaze.compute_angular_error(output, target_angles)
+                    acc1 = torch.tensor(0.0)  # Placeholder
+                    acc5 = torch.tensor(0.0)  # Placeholder
                 else:
                     # Classification task
                     loss = criterion(output, targets)
@@ -97,15 +97,15 @@ class ValidationEngine:
         if cfg.DATA.DATASET_NAME == 'Gaze360':
             if cfg.GAZE.USE_L2CS:
                 # L2CS uses custom criterion
-                return None  # Will be handled in validation loop
+                return utils.gaze.l2cs_criterion
             else:
                 return torch.nn.MSELoss()
         else:
             return torch.nn.CrossEntropyLoss()
     
-    def _compute_l2cs_validation(self, output, pitch_target, yaw_target):
-        """Compute L2CS validation metrics."""
-        # This is a placeholder - implement actual L2CS validation logic
-        loss = torch.tensor(0.0)
-        angular_error = 0.0
-        return loss, angular_error
+    # def _compute_l2cs_validation(self, output, pitch_target, yaw_target):
+    #     """Compute L2CS validation metrics."""
+    #     # This is a placeholder - implement actual L2CS validation logic
+    #     loss = torch.tensor(0.0)
+    #     angular_error = 0.0
+    #     return loss, angular_error
