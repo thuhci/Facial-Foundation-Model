@@ -123,12 +123,11 @@ system:
   log_dir: null
   
   # Distributed training
-  world_size: 2  # 使用2个GPU
+  world_size: 4  # 设置为您的GPU数量
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: true
-  dist_backend: gloo  # 明确指定使用gloo后端
+  distributed: true  # 启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

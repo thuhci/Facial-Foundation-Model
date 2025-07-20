@@ -12,12 +12,19 @@ python run_finetune_with_yacs.py --config configs/gaze360_finetune.yaml
 
 但是 loss 没有下降，可能代码还有 bug.
 
-## 7.19, 7.20 
+## 7.19
 之前的 finetune 的 bug 修了一些。现在 50 epochs 的 err 会降到 30° 左右，并且仍然会慢速下降。
 
 加了 pretraining 的代码，测试了单卡 pretrain 可以运行。
 
 多卡的 nccl 分布式训调试了很久，仍然无法运行，换成了 gloo 后端，可以运行，但是运行极慢。仍待调式。
+
+## 7.20
+gloo 后端的分布式训练修好了，代码如：
+```bash
+torchrun --nproc_per_node=4 --master_port=29501 run_finetuning_with_yacs.py --config configs/gaze360_finetune.yaml
+```
+记得把 `configs/gaze360_finetune.yam` 中的 `distributed` 设置为 `true`，并且 `world_size` 设置为您的 GPU 数量。
 
 当前的文件结构:
 ```
