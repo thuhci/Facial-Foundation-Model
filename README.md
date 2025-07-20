@@ -139,3 +139,21 @@ Place the fine-tuned model in `checkpoint/` to demo.
   python demo.py
   ```
 The output will be saved in `output/`
+
+
+
+# To finetune the model for Gaze 360 dataset
+
+## Dataset preparation
+1. Download the Gaze 360 dataset from [Gaze 360](https://gaze360.csail.mit.edu/) to the current folder.
+2. Run the [preprocess/data_prepocessing_gaze360.py](./preprocess/data_processing_gaze360.py) script to normalize the dataset and labels.
+3. Run the [preprocess/preprocess_gaze360.py](./preprocess/gaze360.py) to align the dataset labels, which will be generated to `saved/data/gaze360/`.
+
+## Script
+```bash
+python run_finetuning_with_yacs.py  \
+ --config configs/gaze360_finetune.yaml  \
+ --output_dir output/gaze360_finetune/ 
+```
+
+[**Can run, but no good result.**]

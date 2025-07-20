@@ -47,6 +47,17 @@ _C.MODEL.LG_CLASSIFY_TOKEN_TYPE = 'org'
 _C.MODEL.LG_NO_SECOND = False
 _C.MODEL.LG_NO_THIRD = False
 
+# for pretrain model
+_C.MODEL.ENCODER_DEPTH = 16
+_C.MODEL.DECODER_DEPTH = 4
+_C.MODEL.NORMALIZE_TARGET = True
+
+# Pretraining specific configuration
+_C.PRETRAINING = CN()
+_C.PRETRAINING.USE_FRAME_DIFF_AS_TARGET = False
+_C.PRETRAINING.FRAME_DIFF_GROUP_SIZE = 2
+_C.PRETRAINING.TARGET_DIFF_WEIGHT = None
+
 # Data configuration
 _C.DATA = CN()
 _C.DATA.DATASET_NAME = 'Kinetics-400'
@@ -83,16 +94,6 @@ _C.AUGMENTATION.RANDOM_ERASE_SPLIT = False
 _C.AUGMENTATION.LABEL_SMOOTHING = 0.1
 _C.AUGMENTATION.NO_AUGMENTATION = False
 
-# mixup_fn = Mixup(
-#             mixup_alpha=cfg.AUGMENTATION.MIXUP_ALPHA,
-#             cutmix_alpha=cfg.AUGMENTATION.CUTMIX_ALPHA,
-#             cutmix_minmax=cfg.AUGMENTATION.CUTMIX_MINMAX,
-#             prob=cfg.AUGMENTATION.MIXUP_PROB,
-#             switch_prob=cfg.AUGMENTATION.MIXUP_SWITCH_PROB,
-#             mode=cfg.AUGMENTATION.MIXUP_MODE,
-#             label_smoothing=cfg.AUGMENTATION.SMOOTHING,
-#             num_classes=cfg.MODEL.NUM_CLASSES
-#         )
 
 # Optimization configuration
 _C.OPTIMIZATION = CN()

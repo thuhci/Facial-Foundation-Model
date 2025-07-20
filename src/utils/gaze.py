@@ -108,7 +108,7 @@ def l2cs_loss(pitch_pred, yaw_pred, pitch_target, yaw_target,
     return total_loss, loss_pitch_ce + loss_yaw_ce, loss_pitch_mse + loss_yaw_mse, angular_error
 
 
-def criterion_l2cs(outputs, targets):
+def l2cs_criterion(outputs, targets):
     cfg = get_cfg()
             # 假设 targets 是 3D gaze 向量
     gaze_2d = gaze3d_to_gaze2d(targets)

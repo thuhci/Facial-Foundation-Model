@@ -83,6 +83,13 @@ def save_on_master(*args, **kwargs):
 
 def init_distributed_mode():
     cfg = get_cfg()
+    
+    # 如果配置还没有加载，先检查环境变量设置基本参数
+    if not hasattr(cfg, '_content') or not cfg._content:
+        # 配置尚未加载，使用默认值或环境变量
+        if cfg.SYSTEM.DIST_BACKEND == 'nccl':  # 默认值
+            cfg.SYSTEM.DIST_BACKEND = 'gloo'  # 临时设为 gloo 避免问题
+    
     if cfg.SYSTEM.DIST_ON_ITP:
         cfg.SYSTEM.LOCAL_RANK = int(os.environ['OMPI_COMM_WORLD_RANK'])
         cfg.SYSTEM.WORLD_SIZE = int(os.environ['OMPI_COMM_WORLD_SIZE'])
@@ -114,12 +121,25 @@ def init_distributed_mode():
 
     cfg.SYSTEM.DISTRIBUTED = True
 
-    torch.cuda.set_device(cfg.SYSTEM.GPU)
-    cfg.SYSTEM.DIST_BACKEND = 'nccl'
-    print('| distributed init (rank {}): {}, gpu {}'.format(
-        cfg.SYSTEM.LOCAL_RANK, cfg.SYSTEM.DIST_URL, cfg.SYSTEM.GPU), flush=True)
-    torch.distributed.init_process_group(backend=cfg.SYSTEM.DIST_BACKEND, init_method=cfg.SYSTEM.DIST_URL,
-                                         world_size=cfg.SYSTEM.WORLD_SIZE, rank=cfg.SYSTEM.RANK)
+    # 根据后端类型设置设备
+    if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo':
+        # Gloo 后端使用 CPU 通信，但模型仍然可以在 GPU 上
+        if torch.cuda.is_available():
+            torch.cuda.set_device(cfg.SYSTEM.GPU)
+    else:
+        # NCCL 后端需要设置 GPU
+        torch.cuda.set_device(cfg.SYSTEM.GPU)
+    
+    print('| distributed init (rank {}): {}, gpu {}, backend {}'.format(
+        cfg.SYSTEM.LOCAL_RANK, cfg.SYSTEM.DIST_URL, cfg.SYSTEM.GPU, cfg.SYSTEM.DIST_BACKEND), flush=True)
+    
+    # 初始化进程组
+    torch.distributed.init_process_group(
+        backend=cfg.SYSTEM.DIST_BACKEND, 
+        init_method=cfg.SYSTEM.DIST_URL,
+        world_size=cfg.SYSTEM.WORLD_SIZE, 
+        rank=cfg.SYSTEM.LOCAL_RANK
+    )
     torch.distributed.barrier()
     # assert torch.distributed.is_initialized()
     setup_for_distributed(cfg.SYSTEM.LOCAL_RANK == 0)

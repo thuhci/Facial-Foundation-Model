@@ -1,6 +1,6 @@
-# Gaze360 finetuning configuration
-# This file contains all the parameters for training the gaze estimation model
+# Multi-GPU training configuration for Gaze360 dataset (using Gloo backend)
 
+# Model configuration
 model:
   name: vit_base_dim512_no_depth_patch16_160
   tubelet_size: 2
@@ -8,7 +8,7 @@ model:
   drop: 0.0
   attn_drop_rate: 0.0
   drop_path: 0.1
-  use_mean_pooling: True
+  use_mean_pooling: true
   # depth: 16
   
   # Attention configuration
@@ -32,19 +32,16 @@ data:
   sampling_rate: 4
   imagenet_default_mean_and_std: true
   
-  # Data loading
-  batch_size: 32
-  num_workers: 4
+  # Data loading - optimized for multi-GPU
+  batch_size: 16  # 每个GPU的批次大小
+  num_workers: 4  # 每个GPU的worker数量
   pin_memory: true
 
 augmentation:
   # Basic augmentation
   color_jitter: 0.4
   train_interpolation: bicubic
-  num_sample: 1  # Disabled for gaze estimation
-  
-  # Auto augmentation (disabled for gaze)
-  # auto_augment: null
+  num_sample: 1
   
   # Mixup augmentation (disabled for gaze estimation)
   mixup: 0.0
@@ -54,28 +51,26 @@ augmentation:
   mixup_switch_prob: 0.5
   mixup_mode: batch
   
-  # Random erase augmentation
-  random_erase_prob: 0.25
+  # Random erasing
+  random_erase_prob: 0.1
   random_erase_mode: pixel
   random_erase_count: 1
   random_erase_split: false
   
   # Label smoothing (disabled for regression)
   label_smoothing: 0.0
+  no_augmentation: false
 
 optimization:
   optimizer: adamw
-  lr: 0.005
+  sched: cosine
+  lr: 0.001
   min_lr: 0.000001
   warmup_lr: 0.000001
   weight_decay: 0.05
   weight_decay_end: null
-  
-  # Learning rate schedule
   warmup_epochs: 5
   warmup_steps: -1
-  
-  # Optimizer specific
   opt_eps: 0.00000001
   opt_betas: [0.9, 0.999]
   momentum: 0.9
@@ -85,20 +80,20 @@ optimization:
   layer_decay: 0.75
 
 training:
-  epochs: 100
+  epochs: 30
   start_epoch: 0
   update_freq: 1
-  save_ckpt_freq: 1
+  save_ckpt_freq: 5
   
-  # Model EMA
-  model_ema: false
+  # Model EMA (注意参数名称)
+  modelema_: false
   model_ema_decay: 0.9999
   model_ema_force_cpu: false
   
   # Evaluation
   disable_eval_during_finetuning: false
   eval_only: false
-  dist_eval: false
+  dist_eval: true  # 启用分布式验证
   
   # Checkpointing
   save_ckpt: true
@@ -106,12 +101,12 @@ training:
   resume: ''
   finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
   
-  # Validation metric
-  val_metric: acc1
+  # Validation metric (改为适合凝视估计的指标)
+  val_metric: mse
 
 gaze:
-  # L2CS configuration (advanced gaze estimation method)
-  use_l2cs: false  # Set to true for L2CS method
+  # L2CS configuration
+  use_l2cs: false
   num_bins: 90
   alpha_reg: 1.0
   bin_width: 2.0
@@ -119,15 +114,16 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/gaze360_finetune_yaml_config
+  output_dir: ./output/gaze360_finetune_multi_gpu_gloo
   log_dir: null
   
-  # Distributed training
-  world_size: 1  # 设置为您的GPU数量
-  local_rank: -1
+  # Distributed training - 将由程序自动设置
+  world_size: 1  # 将被自动设置
+  local_rank: -1  # 将被自动设置
   dist_on_itp: false
   dist_url: env://
-  distributed: false 
+  distributed: true  # fenbu式训练启用
+  dist_backend: gloo  # 使用 Gloo 后端而不是 NCCL
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

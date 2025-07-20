@@ -6,3 +6,4 @@ imgs/
 Gaze360/
 *.pth
 __pycache__
+**/discarded*.py

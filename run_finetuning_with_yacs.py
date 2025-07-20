@@ -15,6 +15,7 @@ import torch.backends.cudnn as cudnn
 import json
 from pathlib import Path
 from collections import OrderedDict
+from functools import partial
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -168,12 +169,14 @@ def create_model_from_config():
             # L2CS: 两个分类头，每个有 num_bins 个输出
             # [DEBUG] change into ModuleList further, now like this for debug
             model.head = torch.nn.ModuleDict({
-                'pitch': torch.nn.Linear(in_features, args.num_bins),
-                'yaw': torch.nn.Linear(in_features, args.num_bins)
+                'pitch': torch.nn.Linear(in_features, cfg.GAZE.NUM_BINS),
+                'yaw': torch.nn.Linear(in_features, cfg.GAZE.NUM_BINS)
             })
         else:
             # 原始方式：直接回归2个角度
-            model.head = torch.nn.Linear(in_features, 2)
+            model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+    else:
+        model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
     
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -269,16 +272,16 @@ def create_optimizer_from_config(model, get_num_layer=None, get_layer_scale=None
         assigner = None
         
     model_without_ddp = model
-    if cfg.SYSTEM.DISTRIBUTED:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
-        model_without_ddp = model.module
     skip_weight_decay_list = model.no_weight_decay()
-    get_num_layer=assigner.get_layer_id if assigner is not None else None,
-    # print("get_num_layer", get_num_layer)
+    
+    # 正确获取函数
+    get_num_layer_fn = assigner.get_layer_id if assigner is not None else None
+    get_layer_scale_fn = assigner.get_scale if assigner is not None else None
+    
     optimizer = create_optimizer(
         model_without_ddp, skip_list=skip_weight_decay_list,
-        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
-        get_layer_scale=assigner.get_scale if assigner is not None else None)
+        get_num_layer=get_num_layer_fn, 
+        get_layer_scale=get_layer_scale_fn)
     
     return optimizer
 
@@ -289,8 +292,8 @@ def create_criterion_from_config():
     
     if cfg.DATA.DATASET_NAME == 'Gaze360':
         if cfg.GAZE.USE_L2CS:
-            from src.utils.gaze.l2cs_criterion import L2CSCriterion
-            criterion = L2CSCriterion()
+            from src.utils.gaze import l2cs_criterion
+            criterion = l2cs_criterion
         else:
             criterion = torch.nn.MSELoss()
     else:
@@ -367,10 +370,7 @@ def create_scheduler_from_config(optimizer, num_training_steps_per_epoch):
 
 def main(args):
     """Main training function."""
-    # Setup distributed training
-    utils.init_distributed_mode()
-    
-    # Load and freeze configuration (recommended workflow)
+    # Load configuration FIRST
     if args.config:
         print(f"Loading configuration from: {args.config}")
         cfg = get_cfg()
@@ -382,21 +382,32 @@ def main(args):
     # Set output directory
     cfg.TRAINING.OUTPUT_DIR = args.output_dir
     
-    # Freeze configuration to make it immutable
-    # print("Freezing configuration...")
-    # freeze_cfg()
+    # Setup distributed training AFTER loading config
+    print(f"Setting up distributed training with backend: {cfg.SYSTEM.DIST_BACKEND}")
+    if cfg.SYSTEM.DISTRIBUTED:
+        utils.init_distributed_mode()
     
-    # Print final configuration
-    # print("Final configuration:")
-    # print(cfg)
+    # Update system config from utils after distributed init
+        cfg.SYSTEM.DISTRIBUTED = utils.is_dist_avail_and_initialized()
+        cfg.SYSTEM.WORLD_SIZE = utils.get_world_size()
+        cfg.SYSTEM.LOCAL_RANK = utils.get_rank()
     
-    # Set device
-    device = torch.device(cfg.SYSTEM.DEVICE if torch.cuda.is_available() else 'cpu')
+    # Set device based on local rank
+    if torch.cuda.is_available() and cfg.SYSTEM.DIST_BACKEND.lower() != 'gloo':
+        torch.cuda.set_device(utils.get_rank())
+        device = torch.device(f'cuda:{utils.get_rank()}')
+        cfg.SYSTEM.DEVICE = f'cuda:{utils.get_rank()}'
+    else:
+        device = torch.device('cpu' if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo' else 'cuda:0')
+        cfg.SYSTEM.DEVICE = device.type
+    
+    print(f"Rank {utils.get_rank()}: Using device {device} with backend {cfg.SYSTEM.DIST_BACKEND}")
     
     # Fix seed
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
+    torch.cuda.manual_seed(seed)
     
     # Enable cudnn benchmark
     cudnn.benchmark = True
@@ -410,21 +421,42 @@ def main(args):
     model = create_model_from_config()
     model.to(device)
     
+    # Wrap model for distributed training BEFORE creating optimizer
+    model_without_ddp = model
+    if cfg.SYSTEM.DISTRIBUTED:
+        print(f"Rank {utils.get_rank()}: Wrapping model with DDP (backend: {cfg.SYSTEM.DIST_BACKEND})")
+        # Synchronize before DDP creation
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        
+        # DDP 参数根据后端类型调整
+        if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo':
+            # Gloo 后端不需要指定 device_ids
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                find_unused_parameters=False,
+                broadcast_buffers=True
+            )
+        else:
+            # NCCL 后端需要指定 device_ids
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, 
+                device_ids=[utils.get_rank()], 
+                output_device=utils.get_rank(),
+                find_unused_parameters=False,
+                broadcast_buffers=True
+            )
+        model_without_ddp = model.module
+        print(f"Rank {utils.get_rank()}: DDP wrapper created successfully")
+    
     # Freeze configuration to make it immutable
     print("Freezing configuration...")
     freeze_cfg()
     
-    # Print final configuration
-    print("Final configuration:")
-    print(cfg)
-    
-    # Wrap model for distributed training
-    model_without_ddp = model
-    if cfg.SYSTEM.DISTRIBUTED:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[cfg.SYSTEM.GPU], find_unused_parameters=True
-        )
-        model_without_ddp = model.module
+    # Print final configuration if main process
+    if utils.get_rank() == 0:
+        print("Final configuration:")
+        print(cfg)
     
     # Setup training components
     
@@ -551,7 +583,7 @@ def main(args):
             'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
         }
         
-        if cfg.TRAINING.OUTPUT_DIR and utils.is_main_process():
+        if cfg.TRAINING.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
             with open(os.path.join(cfg.TRAINING.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
         
