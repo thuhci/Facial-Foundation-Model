@@ -409,14 +409,14 @@ class VideoClsDatasetFrame(Dataset):
                 label_list = []
                 index_list = []
                 for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
-                    new_frames = self._aug_frame(buffer, cfg)
+                    new_frames = self._aug_frame(buffer)
                     label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, cfg)
+                buffer = self._aug_frame(buffer)
 
             return buffer, self.label_array[index], index, {}
 

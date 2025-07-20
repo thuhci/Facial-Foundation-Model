@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from src.utils.config import get_cfg
 from src.optim.mixup import Mixup
-from timm.utils import ModelEma
+from timm.utils import ModelEma, accuracy
 from src import utils
 
 
@@ -67,8 +67,8 @@ class ValidationEngine:
                 else:
                     # Classification task
                     loss = criterion(output, targets)
-                    angular_error = 0.0
-                    acc1, acc5 = utils.accuracy(output, targets, topk=(1, 5))
+                    angular_error = torch.tensor(0.0)
+                    acc1, acc5 = accuracy(output, targets, topk=(1, 5))
             
             # Update metrics
             if cfg.DATA.DATASET_NAME == 'Gaze360':

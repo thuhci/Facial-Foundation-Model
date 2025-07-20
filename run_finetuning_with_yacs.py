@@ -298,13 +298,13 @@ def create_criterion_from_config():
             criterion = torch.nn.MSELoss()
     else:
         # Classification task
-        mixup_active = cfg.AUGMENTATION.MIXUP_ALPHA > 0 or cfg.AUGMENTATION.CUTMIX_ALPHA > 0
+        mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
         if mixup_active:
             # Mixup mode
             criterion = SoftTargetCrossEntropy()
-        elif cfg.AUGMENTATION.SMOOTHING > 0:
+        elif cfg.AUGMENTATION.LABEL_SMOOTHING > 0:
             # Label smoothing
-            criterion = LabelSmoothingCrossEntropy(smoothing=cfg.AUGMENTATION.SMOOTHING)
+            criterion = LabelSmoothingCrossEntropy(smoothing=cfg.AUGMENTATION.LABEL_SMOOTHING)
         else:
             # Standard cross entropy
             criterion = torch.nn.CrossEntropyLoss()
@@ -325,7 +325,7 @@ def create_mixup_from_config():
             prob=cfg.AUGMENTATION.MIXUP_PROB,
             switch_prob=cfg.AUGMENTATION.MIXUP_SWITCH_PROB,
             mode=cfg.AUGMENTATION.MIXUP_MODE,
-            label_smoothing=cfg.AUGMENTATION.SMOOTHING,
+            label_smoothing=cfg.AUGMENTATION.LABEL_SMOOTHING,
             num_classes=cfg.DATA.NUM_CLASSES
         )
     else:

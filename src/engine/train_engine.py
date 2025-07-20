@@ -282,6 +282,7 @@ class TrainingEngine:
                 class_acc = 0.0  # Placeholder for gaze
             else:
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
+                self.log_writer.update(class_acc=class_acc, head="loss")
         else:
             class_acc = None
             
