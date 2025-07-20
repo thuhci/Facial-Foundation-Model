@@ -121,14 +121,11 @@ def init_distributed_mode():
 
     cfg.SYSTEM.DISTRIBUTED = True
 
-    # 根据后端类型设置设备
-    if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo':
-        # Gloo 后端使用 CPU 通信，但模型仍然可以在 GPU 上
-        if torch.cuda.is_available():
-            torch.cuda.set_device(cfg.SYSTEM.GPU)
-    else:
-        # NCCL 后端需要设置 GPU
+    # 设置 GPU 设备（无论什么后端都需要设置正确的设备）
+    if torch.cuda.is_available():
         torch.cuda.set_device(cfg.SYSTEM.GPU)
+        # Gloo 后端可以使用 GPU 模型进行计算，只是通信用 CPU
+        # NCCL 后端全部用 GPU
     
     print('| distributed init (rank {}): {}, gpu {}, backend {}'.format(
         cfg.SYSTEM.LOCAL_RANK, cfg.SYSTEM.DIST_URL, cfg.SYSTEM.GPU, cfg.SYSTEM.DIST_BACKEND), flush=True)

@@ -393,13 +393,13 @@ def main(args):
         cfg.SYSTEM.LOCAL_RANK = utils.get_rank()
     
     # Set device based on local rank
-    if torch.cuda.is_available() and cfg.SYSTEM.DIST_BACKEND.lower() != 'gloo':
+    if torch.cuda.is_available():
         torch.cuda.set_device(utils.get_rank())
         device = torch.device(f'cuda:{utils.get_rank()}')
         cfg.SYSTEM.DEVICE = f'cuda:{utils.get_rank()}'
     else:
-        device = torch.device('cpu' if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo' else 'cuda:0')
-        cfg.SYSTEM.DEVICE = device.type
+        device = torch.device('cpu')
+        cfg.SYSTEM.DEVICE = 'cpu'
     
     print(f"Rank {utils.get_rank()}: Using device {device} with backend {cfg.SYSTEM.DIST_BACKEND}")
     

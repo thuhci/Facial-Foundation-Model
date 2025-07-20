@@ -122,7 +122,7 @@ system:
   local_rank: -1  # 将被自动设置
   dist_on_itp: false
   dist_url: env://
-  distributed: true  # fenbu式训练启用
+  distributed: false  # 将被自动设置
   dist_backend: gloo  # 使用 Gloo 后端而不是 NCCL
   
   # DeepSpeed (advanced optimization)
