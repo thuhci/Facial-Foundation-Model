@@ -171,6 +171,8 @@ class TrainingEngine:
                 return loss, outputs
         else:
             # Classification task
+            # print("example outputs", outputs[0:5])
+            # print("example targets", targets[0:5])
             loss = self.criterion(outputs, targets)
             return loss, outputs
     
@@ -222,20 +224,21 @@ class TrainingEngine:
                         targets: torch.Tensor, grad_norm: Optional[float]):
         """Update training metrics."""
         loss_value = loss.item()
+        loss_scale_value = self._get_loss_scale_for_deepspeed() if self.loss_scaler is None else self.loss_scaler.state_dict()["scale"]
         
         # Compute accuracy
         if self.mixup_fn is None:
             if self.cfg.DATA.DATASET_NAME == 'Gaze360':
                 # For gaze estimation, compute angular error
-                if self.cfg.GAZE.USE_L2CS:
-                    # L2CS mode - angular error is computed in criterion
-                    class_acc = 0.0  # Placeholder
-                else:
+                # if self.cfg.GAZE.USE_L2CS:
+                #     # L2CS mode - angular error is computed in criterion
+                #     class_acc = 0.0  # Placeholder
+                # else:
                     # Standard regression mode
-                    target_angles = gaze3d_to_gaze2d(targets)
-                    angular_error = compute_angular_error(output, target_angles)
-                    class_acc = angular_error
-                    metric_logger.update(angular_error=angular_error)
+                target_angles = gaze3d_to_gaze2d(targets)
+                angular_error = compute_angular_error(output, target_angles)
+                class_acc = angular_error
+                metric_logger.update(angular_error=angular_error)
             else:
                 # Classification task
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
@@ -245,6 +248,7 @@ class TrainingEngine:
         # Update metrics
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
+        metric_logger.update(loss_scale = loss_scale_value)
         
         # Learning rate metrics
         min_lr = 10.

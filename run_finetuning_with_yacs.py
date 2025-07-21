@@ -47,7 +47,7 @@ def get_args_parser():
     
     # Basic arguments
     parser.add_argument('--config', default='', type=str, help='Path to YAML config file', required=True)
-    parser.add_argument('--output_dir', default='./output', type=str, help='Output directory')
+    parser.add_argument('--output_dir', default='./output', type=str, help='Output directory', required=True)
     parser.add_argument('--resume', default='', type=str, help='Resume from checkpoint')
     parser.add_argument('--seed', default=0, type=int, help='Random seed')
     parser.add_argument('--eval', action='store_true', help='Evaluation mode')
@@ -131,6 +131,7 @@ def create_model_from_config():
             drop_block_rate=None,
             use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
             init_scale=cfg.MODEL.INIT_SCALE,
+            depth = cfg.MODEL.DEPTH,
             attn_type=cfg.MODEL.ATTN_TYPE,
             lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
             lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
@@ -151,6 +152,7 @@ def create_model_from_config():
             attn_drop_rate=cfg.MODEL.ATTN_DROP_RATE,
             use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
             init_scale=cfg.MODEL.INIT_SCALE,
+            depth = cfg.MODEL.DEPTH,
             attn_type=cfg.MODEL.ATTN_TYPE,
             lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
             lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
@@ -159,6 +161,8 @@ def create_model_from_config():
             lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
             lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
         )
+        
+    print("model after create_model = %s" % str(model))
         
     model = model.float()
 
@@ -257,31 +261,30 @@ def create_model_from_config():
     return model
 
 
-def create_optimizer_from_config(model, get_num_layer=None, get_layer_scale=None):
+def create_optimizer_from_config(model):
     """Create optimizer from global configuration."""
     cfg = get_cfg()
     
-    # Get layer assignments for layer decay
-    if get_num_layer is not None and get_layer_scale is not None:
+    # Get layer assignments for layer decay (like original implementation)
+    model_without_ddp = model
+    num_layers = model_without_ddp.get_num_layers()
+    if cfg.OPTIMIZATION.LAYER_DECAY < 1.0:
         assigner = LayerDecayValueAssigner(
-            list(cfg.OPTIMIZATION.LAYER_DECAY.values()),
-            get_num_layer,
-            get_layer_scale
+            list(cfg.OPTIMIZATION.LAYER_DECAY ** (num_layers + 1 - i) for i in range(num_layers + 2))
         )
     else:
         assigner = None
         
-    model_without_ddp = model
+    if assigner is not None:
+        print("Assigned values = %s" % str(assigner.values))
+        
     skip_weight_decay_list = model.no_weight_decay()
-    
-    # 正确获取函数
-    get_num_layer_fn = assigner.get_layer_id if assigner is not None else None
-    get_layer_scale_fn = assigner.get_scale if assigner is not None else None
-    
+    print("Skip weight decay list: ", skip_weight_decay_list)
+
     optimizer = create_optimizer(
-        model_without_ddp, skip_list=skip_weight_decay_list,
-        get_num_layer=get_num_layer_fn, 
-        get_layer_scale=get_layer_scale_fn)
+        model=model_without_ddp, skip_list=skip_weight_decay_list,
+        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
+        get_layer_scale=assigner.get_scale if assigner is not None else None)
     
     return optimizer
 
@@ -378,6 +381,9 @@ def main(args):
     else:
         print("Using default configuration")
         cfg = get_cfg()
+        
+    if args.eval:
+        cfg.TRAINING.EVAL_ONLY = True
     
     # Set output directory
     cfg.SYSTEM.OUTPUT_DIR = args.output_dir
@@ -450,8 +456,8 @@ def main(args):
         print(f"Rank {utils.get_rank()}: DDP wrapper created successfully")
     
     # Freeze configuration to make it immutable
-    print("Freezing configuration...")
-    freeze_cfg()
+    # print("Freezing configuration...")
+    # freeze_cfg()
     
     # Print final configuration if main process
     if utils.get_rank() == 0:
@@ -460,11 +466,7 @@ def main(args):
     
     # Setup training components
     
-    if cfg.OPTIMIZATION.LAYER_DECAY is not None:
-        get_num_layer = model_without_ddp.get_num_layer if hasattr(model_without_ddp, 'get_num_layer') else None
-        get_layer_scale = model_without_ddp.get_layer_scale if hasattr(model_without_ddp, 'get_layer_scale') else None
-    
-    optimizer = create_optimizer_from_config(model_without_ddp, get_num_layer, get_layer_scale)
+    optimizer = create_optimizer_from_config(model_without_ddp)
     criterion = create_criterion_from_config()
     mixup_fn = create_mixup_from_config()
     
@@ -486,8 +488,21 @@ def main(args):
     # Create loss scaler
     loss_scaler = NativeScaler()
     
-    # Create scheduler
+    # Calculate effective batch size and apply LR scaling (like original implementation)
+    total_batch_size = cfg.DATA.BATCH_SIZE * cfg.TRAINING.UPDATE_FREQ * utils.get_world_size()
     num_training_steps_per_epoch = len(data_loader_train) // cfg.TRAINING.UPDATE_FREQ
+    
+    # Apply learning rate scaling like in original implementation
+    cfg.OPTIMIZATION.LR = cfg.OPTIMIZATION.LR * total_batch_size / 256
+    cfg.OPTIMIZATION.MIN_LR = cfg.OPTIMIZATION.MIN_LR * total_batch_size / 256  
+    cfg.OPTIMIZATION.WARMUP_LR = cfg.OPTIMIZATION.WARMUP_LR * total_batch_size / 256
+    print("LR = %.8f" % cfg.OPTIMIZATION.LR)
+    print("Batch size = %d" % total_batch_size)
+    print("Update frequent = %d" % cfg.TRAINING.UPDATE_FREQ)
+    print("Number of training examples = %d" % len(data_loader_train.dataset))
+    print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
+    
+    # Create scheduler
     lr_schedule_values, wd_schedule_values = create_scheduler_from_config(
         optimizer, num_training_steps_per_epoch
     )
@@ -514,16 +529,20 @@ def main(args):
     
     # Resume from checkpoint
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            start_epoch = checkpoint['epoch'] + 1
-            if 'scaler' in checkpoint:
-                loss_scaler.load_state_dict(checkpoint['scaler'])
-        else:
-            start_epoch = 0
+        cfg.TRAINING.RESUME = args.resume
+        utils.auto_load_model(
+            model=model, model_without_ddp=model_without_ddp,
+            optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+        # checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
+        # model_without_ddp.load_state_dict(checkpoint['model'])
+        # if not args.eval and 'optimizer' in checkpoint and 'epoch' in checkpoint:
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        #     start_epoch = checkpoint['epoch'] + 1
+        #     if 'scaler' in checkpoint:
+        #         loss_scaler.load_state_dict(checkpoint['scaler'])
+        # else:
+        #     start_epoch = 0
     else:
         start_epoch = 0
     

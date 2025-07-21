@@ -13,18 +13,18 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
   lg_attn_param_sharing_all: false
-  lg_classify_token_type: org
+  lg_classify_token_type: region
   lg_no_second: false
   lg_no_third: false
 
 data:
   dataset_name: MAFW
-  data_path: saved/data/mafw/single/split01
+  data_path: saved/data/mafw/single/split03
   eval_data_path: null
   num_classes: 11
   num_segments: 1
@@ -33,7 +33,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 4
+  batch_size: 32
   num_workers: 4
   pin_memory: true
 
@@ -68,6 +68,7 @@ optimization:
   lr: 0.001
   min_lr: 0.000001
   warmup_lr: 0.000001
+  # warmup_lr: 0.001
   weight_decay: 0.05
   weight_decay_end: null
   
@@ -88,7 +89,7 @@ training:
   epochs: 50
   start_epoch: 0
   update_freq: 1
-  save_ckpt_freq: 5
+  save_ckpt_freq: 10
   
   # Model EMA
   model_ema: false
@@ -105,7 +106,8 @@ training:
   auto_resume: true
   resume: ''
   finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
-  
+  # finetune: null
+
   # Validation metric
   val_metric: acc1
 
@@ -127,7 +129,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: true  # 不启用分布式训练
+  distributed: false  # 启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

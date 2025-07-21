@@ -26,6 +26,9 @@ torchrun --nproc_per_node=4 --master_port=29501 run_finetuning_with_yacs.py --co
 ```
 记得把 `configs/gaze360_finetune.yam` 中的 `distributed` 设置为 `true`，并且 `world_size` 设置为您的 GPU 数量。
 
+## 7.21
+修复了 fnetune 中学习率缩放和模型加载的 bug，现在可以复现原论文的 finetune 结果。
+
 当前的文件结构:
 ```
 .

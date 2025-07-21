@@ -303,10 +303,10 @@ def auto_load_model(model, model_without_ddp, optimizer, loss_scaler, model_ema=
                 checkpoint = torch.hub.load_state_dict_from_url(
                     cfg.TRAINING.RESUME, map_location='cpu', check_hash=True)
             else:
-                checkpoint = torch.load(cfg.TRAINING.RESUME, map_location='cpu')
+                checkpoint = torch.load(cfg.TRAINING.RESUME, map_location='cpu', weights_only=False)
             model_without_ddp.load_state_dict(checkpoint['model'])
             print("Resume checkpoint %s" % cfg.TRAINING.RESUME)
-            if 'optimizer' in checkpoint and 'epoch' in checkpoint:
+            if 'optimizer' in checkpoint and 'epoch' in checkpoint and not cfg.TRAINING.EVAL_ONLY:
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 # me: handling to eval best checkpoint
                 if checkpoint['epoch'] != 'best':

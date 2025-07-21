@@ -127,7 +127,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 不启用分布式训练
+  distributed: true  # 不启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false
