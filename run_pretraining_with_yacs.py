@@ -34,7 +34,7 @@ def get_args_parser():
     
     # Basic arguments
     parser.add_argument('--config', default='', type=str, help='Path to YAML config file', required=True)
-    parser.add_argument('--output_dir', default='./output', type=str, help='Output directory')
+    parser.add_argument('--output_dir', default='./output', type=str, help='Output directory', required=True)
     parser.add_argument('--resume', default='', type=str, help='Resume from checkpoint')
     parser.add_argument('--seed', default=0, type=int, help='Random seed')
     
@@ -96,6 +96,7 @@ def create_model_from_config():
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_no_second=cfg.MODEL.LG_NO_SECOND,
             lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            # keep_temporal_dim = True # [TO DEBUG]
         )
     else:
         model = create_model(
@@ -241,9 +242,10 @@ def main(args):
         model_without_ddp = model.module
     
     # Create optimizer and scheduler
+    lr_schedule_values, wd_schedule_values = create_scheduler_from_config(num_training_steps_per_epoch)
     optimizer = create_optimizer_from_config(model_without_ddp)
     loss_scaler = NativeScaler()
-    lr_schedule_values, wd_schedule_values = create_scheduler_from_config(num_training_steps_per_epoch)
+    
     
     # Auto load model if needed
     utils.utils.auto_load_model(
