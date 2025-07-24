@@ -29,7 +29,7 @@ model:
 
 data:
   dataset_name: voxceleb2
-  data_path: saved/data/voxceleb2/train.csv
+  data_path: saved/data/voxceleb2/info_clean.csv
   eval_data_path: null
   num_classes: 2
   num_segments: 1
@@ -38,7 +38,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 2  # Small batch size for pretraining
+  batch_size: 4  # Small batch size for pretraining
   num_workers: 4
   pin_memory: true
 
