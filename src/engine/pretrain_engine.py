@@ -134,28 +134,20 @@ class PretrainEngine:
                 videos_patch = rearrange(unnorm_videos, 
                     'b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2 c)', 
                     p0=self.cfg.MODEL.TUBELET_SIZE, p1=patch_size, p2=patch_size)
-
             # Handle frame difference as target
             if self.cfg.PRETRAINING.USE_FRAME_DIFF_AS_TARGET:
-                videos_patch = self._apply_frame_diff_target(unnorm_videos, patch_size)
-
+                videos_patch = self._apply_frame_diff_target(unnorm_videos, videos_patch, patch_size)
             B, _, C = videos_patch.shape
             labels = videos_patch[bool_masked_pos].reshape(B, -1, C)
 
         return labels
-    
-    def _apply_frame_diff_target(self, unnorm_videos: torch.Tensor, patch_size: int) -> torch.Tensor:
+
+    def _apply_frame_diff_target(self, unnorm_videos: torch.Tensor, videos_patch: torch.Tensor, patch_size: int) -> torch.Tensor:
         """Apply frame difference as target."""
         _, _, t_in, h_in, w_in = unnorm_videos.shape
         t_tokenized = t_in // self.cfg.MODEL.TUBELET_SIZE
         h_tokenized = h_in // patch_size
         w_tokenized = w_in // patch_size
-        
-        # Convert to patch format
-        videos_patch = rearrange(unnorm_videos, 
-            'b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2 c)', 
-            t=t_tokenized, h=h_tokenized, w=w_tokenized, 
-            p0=self.cfg.MODEL.TUBELET_SIZE, p1=patch_size, p2=patch_size)
         
         # Reshape for frame difference computation
         videos_patch = rearrange(videos_patch, 
