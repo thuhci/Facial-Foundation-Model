@@ -139,6 +139,7 @@ def create_model_from_config():
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
             lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            # keep_temporal_dim = True # [QZK]: try 
         )
     else:
         model = create_model(
@@ -607,19 +608,73 @@ def main(args):
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
         
-        # Track best accuracy
+        # Track best accuracy and save best model
         if cfg.DATA.DATASET_NAME == 'Gaze360':
             current_metric = test_stats.get('mean_angle_error', 1e8)
             if current_metric < max_accuracy or epoch == start_epoch:
                 max_accuracy = current_metric
                 best_epoch = epoch
+                # Save best model
+                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                    utils.save_model(
+                        "best", model, model_without_ddp, optimizer, 
+                        loss_scaler, model_ema)
         else:
-            current_metric = test_stats.get('acc1', 0)
-            if current_metric > max_accuracy:
+            # For classification, we can choose different metrics for best model selection
+            metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
+            current_metric = test_stats.get(metric_name, 0)
+            is_better = current_metric > max_accuracy
+            
+            if is_better or epoch == start_epoch:
                 max_accuracy = current_metric
                 best_epoch = epoch
+                # Save best model
+                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                    utils.save_model(
+                        "best", model, model_without_ddp, optimizer, 
+                        loss_scaler, model_ema)
         
-        print(f'Max accuracy: {max_accuracy:.4f} at epoch {best_epoch}')
+        print(f'Max {metric_name if "metric_name" in locals() else "accuracy"}: {max_accuracy:.4f} at epoch {best_epoch}')
+    
+    # Final evaluation with detailed metrics
+    print("Performing final evaluation...")
+    final_test_stats = validation_engine.validate(data_loader_val)
+    
+    # For classification tasks, compute and save detailed metrics
+    if cfg.DATA.DATASET_NAME != 'Gaze360' and utils.is_main_process():
+        print("Computing detailed metrics...")
+        detailed_stats = validation_engine.compute_detailed_metrics(data_loader_val)
+        
+        # Save detailed results
+        final_results = {
+            'final_acc1': final_test_stats.get('acc1', 0),
+            'final_acc5': final_test_stats.get('acc5', 0),
+            'final_uar': final_test_stats.get('uar', 0),
+            'final_war': final_test_stats.get('war', 0),
+            'final_weighted_f1': final_test_stats.get('weighted_f1', 0),
+            'final_micro_f1': final_test_stats.get('micro_f1', 0),
+            'final_macro_f1': final_test_stats.get('macro_f1', 0),
+            'best_epoch': best_epoch,
+            'best_metric': max_accuracy
+        }
+        
+        print(f"Final Results:")
+        print(f"Acc@1: {final_results['final_acc1']:.4f}")
+        print(f"Acc@5: {final_results['final_acc5']:.4f}")
+        print(f"UAR: {final_results['final_uar']:.4f}")
+        print(f"WAR: {final_results['final_war']:.4f}")
+        print(f"Weighted F1: {final_results['final_weighted_f1']:.4f}")
+        print(f"Micro F1: {final_results['final_micro_f1']:.4f}")
+        print(f"Macro F1: {final_results['final_macro_f1']:.4f}")
+        
+        # Save to log file
+        if cfg.SYSTEM.OUTPUT_DIR:
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "final_results.json"), "w") as f:
+                json.dump(final_results, f, indent=2)
+                
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                f.write("=== FINAL RESULTS ===\n")
+                f.write(json.dumps(final_results, indent=2) + "\n")
     
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
