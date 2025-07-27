@@ -10,6 +10,8 @@ model:
   drop_path: 0.1
   use_mean_pooling: True
   # depth: 16
+
+  use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
   
   # Attention configuration
   attn_type: local_global
@@ -26,6 +28,7 @@ data:
   dataset_name: Gaze360
   data_path: saved/data/gaze360
   eval_data_path: null
+  task: regression
   num_classes: 2
   num_segments: 1
   num_frames: 16
@@ -39,7 +42,7 @@ data:
 
 augmentation:
   # Basic augmentation
-  color_jitter: 0.4
+  color_jitter: 0.0
   train_interpolation: bicubic
   num_sample: 1  # Disabled for gaze estimation
   
@@ -55,7 +58,7 @@ augmentation:
   mixup_mode: batch
   
   # Random erase augmentation
-  random_erase_prob: 0.25
+  random_erase_prob: 0.0
   random_erase_mode: pixel
   random_erase_count: 1
   random_erase_split: false
@@ -127,7 +130,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: true  # 不启用分布式训练
+  distributed: false  # 不启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

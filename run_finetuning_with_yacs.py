@@ -139,7 +139,7 @@ def create_model_from_config():
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
             lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
-            # keep_temporal_dim = True # [QZK]: try 
+            keep_temporal_dim  = cfg.MODEL.KEEP_TEMPORAL_DIM,
         )
     else:
         model = create_model(
@@ -161,14 +161,15 @@ def create_model_from_config():
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
             lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            keep_temporal_dim  = cfg.MODEL.KEEP_TEMPORAL_DIM,
         )
         
     print("model after create_model = %s" % str(model))
         
     model = model.float()
 
-    # 针对Gaze360任务修改输出层
-    if cfg.DATA.DATASET_NAME == 'Gaze360':
+    # 针对regression任务修改输出层
+    if cfg.DATA.TASK == 'regression':
         in_features = model.head.in_features
         if cfg.GAZE.USE_L2CS:
             # L2CS: 两个分类头，每个有 num_bins 个输出
@@ -294,7 +295,7 @@ def create_criterion_from_config():
     """Create loss criterion from global configuration."""
     cfg = get_cfg()
     
-    if cfg.DATA.DATASET_NAME == 'Gaze360':
+    if cfg.DATA.TASK == 'regression':
         if cfg.GAZE.USE_L2CS:
             from src.utils.gaze import l2cs_criterion
             criterion = l2cs_criterion
@@ -609,7 +610,7 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
         
         # Track best accuracy and save best model
-        if cfg.DATA.DATASET_NAME == 'Gaze360':
+        if cfg.DATA.TASK == 'regression':
             current_metric = test_stats.get('mean_angle_error', 1e8)
             if current_metric < max_accuracy or epoch == start_epoch:
                 max_accuracy = current_metric
@@ -641,7 +642,7 @@ def main(args):
     final_test_stats = validation_engine.validate(data_loader_val)
     
     # For classification tasks, compute and save detailed metrics
-    if cfg.DATA.DATASET_NAME != 'Gaze360' and utils.is_main_process():
+    if cfg.DATA.TASK != 'regression' and utils.is_main_process():
         print("Computing detailed metrics...")
         detailed_stats = validation_engine.compute_detailed_metrics(data_loader_val)
         

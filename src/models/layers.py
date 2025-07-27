@@ -343,6 +343,58 @@ class PatchEmbed(nn.Module):
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
+    
+class EnhancedPatchEmbed(nn.Module):
+    def __init__(self, img_size = 160, pad_ker_str_tem_chan = [[0,2,2,1,32],[0,2,2,1,64],[0,2,2,1,256],[0,2,2,2,768]], 
+             in_chans=3, embed_dim=768, num_frames=16, tubelet_size=2):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        self.tubelet_size = int(tubelet_size)
+        tem_size = 1
+        img_sizes = [img_size]
+        for pad_ker_str_tem in pad_ker_str_tem_chan:
+            padding, kernel_size, stride, temporal_stride, chan = pad_ker_str_tem
+            img_size = list(img_size)
+            img_size[0] = (img_size[0] + 2 * padding - kernel_size) // stride + 1
+            img_size[1] = (img_size[1] + 2 * padding - kernel_size) // stride + 1
+            img_sizes.append(img_size)
+            tem_size = tem_size * temporal_stride
+        assert tem_size == self.tubelet_size, \
+            f"Input temporal size ({tem_size}) doesn't match model ({self.tubelet_size})."
+        self.img_sizes = img_sizes
+        
+        self.temporal_seq_len = num_frames // self.tubelet_size
+        self.spatial_num_patches = img_sizes[-1][0]  * img_sizes[-1][1] 
+        self.num_patches = self.spatial_num_patches * self.temporal_seq_len
+        self.input_token_size = (self.temporal_seq_len, img_sizes[-1][0], img_sizes[-1][1])
+        
+        self.patch_size = (img_sizes[0][0]//img_sizes[-1][0], img_sizes[0][1]//img_sizes[-1][1])
+        
+        self.proj = nn.ModuleList()
+        for i, (padding, kernel_size, stride, temporal_stride, now_embed_dim) in enumerate(pad_ker_str_tem_chan):
+            self.proj.append(
+                nn.Conv3d(in_channels=in_chans if i == 0 else pad_ker_str_tem_chan[i-1][-1], 
+                          out_channels=embed_dim if i == len(pad_ker_str_tem_chan) - 1 else now_embed_dim, 
+                          kernel_size=(temporal_stride, kernel_size, kernel_size), 
+                          stride=(temporal_stride, stride, stride), 
+                          padding=(0, padding, padding))
+            )
+            self.proj.append(
+                nn.BatchNorm3d(embed_dim if i == len(pad_ker_str_tem_chan) - 1 else now_embed_dim)
+            )
+            self.proj.append(nn.ReLU(inplace=True))
+            
+    def forward(self, x, **kwargs):
+        B, C, T, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        assert H == self.img_sizes[0][0] and W == self.img_sizes[0][1], \
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_sizes[0][0]}*{self.img_sizes[0][1]})."
+        for i in range(len(self.proj)):
+            x = self.proj[i](x)
+            # print(f"After layer {i+1}, x.shape: {x.shape}")
+        x = x.flatten(2).transpose(1, 2)
+        return x
+        
 
 # sin-cos position encoding
 # https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/Models.py#L31

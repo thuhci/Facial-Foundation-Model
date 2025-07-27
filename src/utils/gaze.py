@@ -42,7 +42,7 @@ def compute_angular_error(pred_spherical, target_spherical):
     return torch.mean(angular_error)
 
 def gaze3d_to_gaze2d(gaze_3d):
-    """将3D gaze向量转换为2D角度（pitch, yaw）"""
+    """将3D gaze向量转换为2D角度（pitch, yaw）就是cartesian_to_spherical"""
     x = gaze_3d[:, 0]
     y = gaze_3d[:, 1]
     z = gaze_3d[:, 2]

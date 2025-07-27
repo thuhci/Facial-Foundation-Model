@@ -51,7 +51,7 @@ class ValidationEngine:
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
                 
-                if cfg.DATA.DATASET_NAME == 'Gaze360':
+                if cfg.DATA.TASK == 'regression':
                     # if cfg.GAZE.USE_L2CS:
                     #     # L2CS validation
                     #     gaze_2d = utils.gaze.gaze3d_to_gaze2d(targets)
@@ -64,7 +64,12 @@ class ValidationEngine:
                     #     acc5 = torch.tensor(0.0)  # Placeholder
                     # else:
                     #     # Standard gaze regression
-                    target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                    if targets.dim() == 2 and targets.size(1) == 3:
+                        # 3D gaze vector
+                        target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                    else:
+                        target_angles = targets
+                    # target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
                     loss = criterion(output, target_angles)
                     angular_error = utils.gaze.compute_angular_error(output, target_angles)
                     acc1 = torch.tensor(0.0)  # Placeholder
@@ -81,7 +86,7 @@ class ValidationEngine:
                     all_targets.extend(targets.cpu().numpy())
             
             # Update metrics
-            if cfg.DATA.DATASET_NAME == 'Gaze360':
+            if cfg.DATA.TASK == 'regression' :
                 total_angular_error += angular_error * videos.shape[0]
                 num_samples += videos.shape[0]
             
@@ -93,7 +98,7 @@ class ValidationEngine:
         
         # Compute UAR, WAR and F1 scores for classification tasks
         uar, war, weighted_f1, micro_f1, macro_f1 = 0.0, 0.0, 0.0, 0.0, 0.0
-        if cfg.DATA.DATASET_NAME != 'Gaze360' and len(all_predictions) > 0:
+        if cfg.DATA.TASK != 'regression' and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score
             conf_mat = confusion_matrix(y_true=all_targets, y_pred=all_predictions)
             class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
@@ -111,7 +116,7 @@ class ValidationEngine:
             metric_logger.meters['macro_f1'].update(macro_f1, n=len(all_predictions))
         
         # Compute final metrics
-        if cfg.DATA.DATASET_NAME == 'Gaze360':
+        if cfg.DATA.TASK == 'regression' and num_samples > 0:
             mean_angular_error = total_angular_error / num_samples
             metric_logger.meters['mean_angle_error'].update(mean_angular_error, n=num_samples)
             print(f'* Mean Angular Error {mean_angular_error:.4f}° loss {metric_logger.loss.global_avg:.6f}')
@@ -126,7 +131,7 @@ class ValidationEngine:
     def _setup_criterion(self):
         cfg = get_cfg()
         """Setup validation criterion."""
-        if cfg.DATA.DATASET_NAME == 'Gaze360':
+        if cfg.DATA.TASK == 'regression':
             if cfg.GAZE.USE_L2CS:
                 # L2CS uses custom criterion
                 return utils.gaze.l2cs_criterion
@@ -158,13 +163,13 @@ class ValidationEngine:
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
                 
-                if cfg.DATA.DATASET_NAME != 'Gaze360':
+                if cfg.DATA.TASK == 'regression':
                     predictions = output.argmax(dim=1)
                     all_predictions.extend(predictions.cpu().numpy())
                     all_targets.extend(targets.cpu().numpy())
                     all_outputs.extend(output.cpu().numpy())
-        
-        if cfg.DATA.DATASET_NAME != 'Gaze360' and len(all_predictions) > 0:
+
+        if cfg.DATA.TASK == 'regression' and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score, classification_report
             import pandas as pd
             

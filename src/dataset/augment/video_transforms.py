@@ -652,6 +652,12 @@ def create_random_augment(
             return transforms.Compose(
                 [rand_augment_transform(auto_augment, aa_params)]
             )
+        else:
+            raise ValueError(
+                "Unknown auto_augment type: {}. "
+                "Only rand-augment is supported.".format(auto_augment)
+            )
+
     # print("[before not implemented] input_size: ", input_size, " auto_augment: ", auto_augment, " interpolation: ", interpolation)
     raise NotImplementedError
 

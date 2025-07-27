@@ -6,7 +6,8 @@ import torch.nn.functional as F
 from timm.models.layers import drop_path, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 from einops import rearrange, repeat
-from src.models.layers import PatchEmbed, get_sinusoid_encoding_table, LGBlock
+from src.models.layers import PatchEmbed, get_sinusoid_encoding_table, LGBlock, EnhancedPatchEmbed
+from src.utils.config import get_cfg 
 
 def _cfg(url='', **kwargs):
     return {
@@ -55,8 +56,15 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.tubelet_size = tubelet_size
-        self.patch_embed = PatchEmbed(
-            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim, num_frames=all_frames, tubelet_size=self.tubelet_size)
+        # [QZK]: patch 16 may be too large for Gaze! 
+        cfg = get_cfg()
+        if cfg.MODEL.USE_ENHANCED_PATCH_EMBED:
+            print("==> Use EnhancedPatchEmbed for patch embedding")
+            self.patch_embed = EnhancedPatchEmbed(img_size=img_size, in_chans=in_chans, embed_dim=embed_dim, num_frames=all_frames, tubelet_size=self.tubelet_size)
+            # [TODO]: support more patch embedding types
+        else:
+            self.patch_embed = PatchEmbed(
+                img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim, num_frames=all_frames, tubelet_size=self.tubelet_size)
         num_patches = self.patch_embed.num_patches
 
         if use_learnable_pos_emb:
@@ -166,52 +174,81 @@ class VisionTransformer(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x):
+        # print("==> in VisionTransformer forward_features")
+        # print("shape of x before patch embedding:", x.shape)
+        # x: (B, C, T, H, W)
         x = self.patch_embed(x)
+        # x: (B, num_patches, embed_dim)
+        # print("shape of x after patch embedding:", x.shape)
         B, _, _ = x.size()
 
         if self.pos_embed is not None:
             # print("shape of pos_embed:", self.pos_embed.shape)
             # print("shape of x before pos_embed:", x.shape)
+            # pos_embed: (1, num_patches, embed_dim)
             x = x + self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
         x = self.pos_drop(x)
 
         if self.attn_type == 'local_global':
+            # print("==> Local-Global attention mode")
             # input: region partition
             nt, t = self.lg_num_region_size[0], self.lg_region_size[0]
             nh, h = self.lg_num_region_size[1], self.lg_region_size[1]
             nw, w = self.lg_num_region_size[2], self.lg_region_size[2]
             b = x.size(0)
+            # print(f" Local-Global attention: nt={nt}, t={t}, nh={nh}, h={h}, nw={nw}, w={w}, b={b}")
             x = rearrange(x, 'b (nt t nh h nw w) c -> b (nt nh nw) (t h w) c', nt=nt,nh=nh,nw=nw,t=t,h=h,w=w)
+            # print("shape of x after rearrange:", x.shape)
             # add region (i.e., representative) tokens
+            # [QZK]: why not randomly ininitialize region tokens? but use learnable initialization?
             region_tokens = repeat(self.lg_region_tokens, 'n c -> b n 1 c', b=b)
             x = torch.cat([region_tokens, x], dim=2) # (b, nt*nh*nw, 1+thw, c)
+            # print("shape of x after adding region tokens:", x.shape)
             x = rearrange(x, 'b n s c -> (b n) s c') # s = 1 + thw
+            # print("shape of x after rearrange for blocks:", x.shape)
             # run through each block
-            for blk in self.blocks:
-                x = blk(x, b) # (b*n, s, c)
+            for i, blk in enumerate(self.blocks):
+                x = blk(x, b) # (b*n, s, c), stays the same shape
+                # print(f"shape of x after block {i}:", x.shape)
+                
+            
 
             x = rearrange(x, '(b n) s c -> b n s c', b=b) # s = 1 + thw
+            
+            # print("shape of x after rearrange for norm:", x.shape)
+            
             # token for final classification
+            # [QZK] don;t quite understand why we need don;t use all tokens for classification
             if self.lg_classify_token_type == 'region': # only use region tokens for classification
                 x = x[:,:,0] # (b, n, c)
             elif self.lg_classify_token_type == 'org': # only use original tokens for classification
                 x = rearrange(x[:,:,1:], 'b n s c -> b (n s) c') # s = thw
             else: # use all tokens for classification
                 x = rearrange(x, 'b n s c -> b (n s) c') # s = 1 + thw
+                
+            # print("shape of x after rearrange for classification:", x.shape)
 
         else:
-            for blk in self.blocks:
+            for i, blk in enumerate(self.blocks):
                 x = blk(x)
+                # print(f"shape of x after block {i}:", x.shape)
+                
+        # something like (B, num_patches or more, embed_dim)
 
         x = self.norm(x)
+        # print("shape of x after norm:", x.shape)
+        # depends, if mean pooling is used, x should be (B, T, embed_dim); o/w, x 
         if self.fc_norm is not None:
             # me: add frame-level prediction support
             if self.keep_temporal_dim:
-                x = rearrange(x, 'b (t hw) c -> b c t hw',
-                              t=self.patch_embed.temporal_seq_len,
-                              hw=self.patch_embed.spatial_num_patches)
-                # spatial mean pooling
-                x = x.mean(-1) # (B, C, T)
+                # x = rearrange(x, 'b (t hw) c -> b c t hw',
+                #               t=self.patch_embed.temporal_seq_len,
+                #               hw=self.patch_embed.spatial_num_patches)
+                # x = x.mean(-1) # (B, C, T)
+                # original one don't seem to work
+                x = rearrange(x, 'b t c -> b c t')  # (B, embed_dim, T)
+                     
+                # print("shape of x after spatial mean pooling:", x.shape)
                 # temporal upsample: 8 -> 16, for patch embedding reduction
                 x = torch.nn.functional.interpolate(
                     x, scale_factor=self.patch_embed.tubelet_size,
@@ -225,11 +262,15 @@ class VisionTransformer(nn.Module):
             return x[:, 0]
 
     def forward(self, x, save_feature=False):
+        # print("==> in VisionTransformer forward")
         x = self.forward_features(x)
+        # print("==> out of VisionTransformer forwardFeatures")
+        # print("shape of x after forward_features:", x.shape)
+        # x: (B, T?, embed_dim) if keep_temporal_dim is True, else (B, embed_dim)
         if save_feature:
             feature = x
         
-        
+        # [QZK]: for L2CS on Gaze
         if isinstance(self.head, nn.ModuleDict):
             return {
                 'pitch': self.head['pitch'](x),

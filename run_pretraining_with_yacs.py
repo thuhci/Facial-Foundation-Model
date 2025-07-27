@@ -96,7 +96,6 @@ def create_model_from_config():
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_no_second=cfg.MODEL.LG_NO_SECOND,
             lg_no_third=cfg.MODEL.LG_NO_THIRD,
-            # keep_temporal_dim = True # [TO DEBUG]
         )
     else:
         model = create_model(
@@ -112,7 +111,7 @@ def create_model_from_config():
             lg_attn_param_sharing_first_third=cfg.MODEL.LG_ATTN_PARAM_SHARING_FIRST_THIRD,
             lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
             lg_no_second=cfg.MODEL.LG_NO_SECOND,
-            lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            lg_no_third=cfg.MODEL.LG_NO_THIRD
         )
     
     model = model.float()
@@ -198,14 +197,21 @@ def main(args):
     
     print(args)
     
-    # Set device based on local rank
-    if torch.cuda.is_available() and cfg.SYSTEM.DIST_BACKEND.lower() != 'gloo':
-        device = torch.device(f'cuda:{utils.utils.get_rank()}')
+    # Set device based on local rank and CUDA availability
+    if torch.cuda.is_available():
+        # Use GPU if available
+        local_rank = utils.utils.get_rank()
+        device = torch.device(f'cuda:{local_rank}')
         torch.cuda.set_device(device)
+        print(f"Rank {local_rank}: Using GPU device {device} with backend {cfg.SYSTEM.DIST_BACKEND}")
     else:
+        # Fallback to CPU
         device = torch.device('cpu')
-    
-    print(f"Rank {utils.utils.get_rank()}: Using device {device} with backend {cfg.SYSTEM.DIST_BACKEND}")
+        print(f"Rank {utils.utils.get_rank()}: Using CPU device with backend {cfg.SYSTEM.DIST_BACKEND}")
+        # If using CPU, should use gloo backend
+        if cfg.SYSTEM.DIST_BACKEND.lower() == 'nccl':
+            print("Warning: NCCL backend not supported for CPU, switching to gloo")
+            cfg.SYSTEM.DIST_BACKEND = 'gloo'
     
     # Fix seed
     seed = args.seed + utils.utils.get_rank()
@@ -238,7 +244,14 @@ def main(args):
     
     # Setup distributed training
     if cfg.SYSTEM.DISTRIBUTED:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[utils.utils.get_rank()], find_unused_parameters=True)
+        if device.type == 'cuda':
+            # GPU training - specify device_ids (use 0 as it's the local device ID)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[device.index], output_device=device.index, find_unused_parameters=True)
+        else:
+            # CPU training - no device_ids
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, find_unused_parameters=True)
         model_without_ddp = model.module
     
     # Create optimizer and scheduler

@@ -15,6 +15,7 @@ import src.dataset.augment.video_transforms as video_transforms
 import src.dataset.augment.volume_transforms as volume_transforms
 import random
 import glob
+import h5py
 
 
 class VideoClsDataset(Dataset):
@@ -511,6 +512,11 @@ class VideoClsDatasetFrame(Dataset):
             [0.08, 1.0],
             [0.75, 1.3333],
         )
+        
+        if cfg.DATA.TASK == 'regression':
+            # scl and asp are not used in regression task
+            scl = [1.0, 1.0]
+            asp = [1.0, 1.0]
 
         buffer = spatial_sampling(
             buffer,
@@ -518,7 +524,7 @@ class VideoClsDatasetFrame(Dataset):
             min_scale=256,
             max_scale=320,
             crop_size=self.crop_size,
-            random_horizontal_flip=False if cfg.DATA.DATASET_NAME == 'SSV2' else True,
+            random_horizontal_flip=False if cfg.DATA.TASK == 'regression' else True,
             inverse_uniform_sampling=False,
             aspect_ratio=asp,
             scale=scl,
@@ -686,7 +692,7 @@ class VideoReaderGaze360:
         return [self.pil_loader(frame) for frame in return_frames]
 
 
-class VideoClsDatasetGaze360(VideoClsDatasetFrame):
+class VideoRegDatasetGaze360(VideoClsDatasetFrame):
     """Specialized dataset for Gaze360 sequential frame prediction"""
     
     def __init__(self, anno_path, data_path, mode='train', clip_len=16,
@@ -825,6 +831,293 @@ class VideoClsDatasetGaze360(VideoClsDatasetFrame):
             # Just apply the standard transform
             buffer = self.data_transform(buffer)
             return buffer, self.test_label_array[index], sample, chunk_nb, split_nb
+        else:
+            raise NameError('mode {} unknown'.format(self.mode))
+
+
+class VideoReaderEVE:
+    """Specialized video reader for EVE dataset with HDF5 label files"""
+    def __init__(self, video_path, h5_path, clip_len=16, frame_sample_rate=1):
+        self.video_path = video_path
+        self.h5_path = h5_path  
+        self.clip_len = clip_len
+        self.frame_sample_rate = frame_sample_rate
+        
+        # Load video using decord
+        try:
+            self.vr = VideoReader(video_path, num_threads=1, ctx=cpu(0))
+            self.total_frames = len(self.vr)
+        except Exception as e:
+            print(f"Error loading video {video_path}: {e}")
+            self.vr = None
+            self.total_frames = 0
+    
+    def load_h5_labels(self, frame_indices):
+        """Load labels from h5 file for given frame indices"""
+        # print(f"Loading labels from {self.h5_path} for frames: {frame_indices}")
+        try:
+            with h5py.File(self.h5_path, 'r') as h5f:
+                # Assuming the h5 file has keys like 'left_g_tobii', 'right_g_tobii', etc.
+                # You may need to adjust these keys based on your actual h5 file structure
+                labels = {}
+                # print("successfully opened h5 file, which has keys: ", list(h5f.keys()))
+                
+                # Load gaze direction data (adjust keys as needed)
+                if 'left_g_tobii' in h5f:
+                    labels['left_g_tobii'] = h5f['left_g_tobii']['data'][frame_indices]
+                    labels['left_g_tobii_validity'] = h5f['left_g_tobii']['validity'][frame_indices]
+                
+                if 'right_g_tobii' in h5f:
+                    labels['right_g_tobii'] = h5f['right_g_tobii']['data'][frame_indices]
+                    labels['right_g_tobii_validity'] = h5f['right_g_tobii']['validity'][frame_indices]
+                
+                # Load Point of Gaze data
+                if 'face_g_tobii' in h5f:
+                    labels['face_g_tobii'] = h5f['face_g_tobii']['data'][frame_indices]
+                    labels['right_g_tobii_validity'] = h5f['face_g_tobii']['validity'][frame_indices]
+                    
+                # print("h5f['face_g_tobii']['data']", h5f['face_g_tobii']['data'][:][:])
+                # print("frame_indices", frame_indices)
+                # print("labels", labels)
+                
+                # print(f"Loaded labels for frames: {frame_indices}, the keys are: {list(labels.keys())}")
+                return labels
+        except Exception as e:
+            print(f"Error loading h5 labels from {self.h5_path}: {e}")
+            return {}
+    
+    def load_clip(self, end_frame_idx=None):
+        """Load video clip ending at specified frame index"""
+        if self.vr is None or self.total_frames == 0:
+            return [], None
+        
+        # If no end frame specified, use the last frame
+        if end_frame_idx is None:
+            end_frame_idx = self.total_frames - 1
+        
+        # Calculate start frame index
+        frames_needed = self.clip_len * self.frame_sample_rate
+        start_frame_idx = max(0, end_frame_idx - frames_needed + 1)
+        
+        # Generate frame indices with sampling rate
+        frame_indices = list(range(start_frame_idx, end_frame_idx + 1, self.frame_sample_rate))
+        
+        # Pad if necessary (repeat first frame)
+        if len(frame_indices) < self.clip_len:
+            padding_needed = self.clip_len - len(frame_indices)
+            frame_indices = [frame_indices[0]] * padding_needed + frame_indices
+        
+        # Take only the required number of frames
+        frame_indices = frame_indices[-self.clip_len:]
+        
+        try:
+            # Load video frames
+            self.vr.seek(0)
+            # print("Loading frames from indices:", frame_indices)
+            frames = self.vr.get_batch(frame_indices).asnumpy()
+            
+            # Convert to PIL images
+            pil_frames = [Image.fromarray(frame) for frame in frames]
+            
+            # Load corresponding labels
+            labels = self.load_h5_labels([end_frame_idx])  # Only get label for last frame
+            
+            return pil_frames, labels
+            
+        except Exception as e:
+            print(f"Error loading frames: {e}")
+            return [], None
+
+
+class VideoRegDatasetEVE(VideoClsDatasetFrame):
+    """Specialized dataset for EVE with video input and h5 label files"""
+    
+    def __init__(self, anno_path, data_path, mode='train', clip_len=16,
+                 frame_sample_rate=1, crop_size=224, short_side_size=256,
+                 new_height=256, new_width=340, keep_aspect_ratio=True,
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, 
+                 h5_dir=None, predict_last_frame=True):
+        # Initialize parent class with regression task
+        super().__init__(
+            anno_path=anno_path, data_path=data_path, mode=mode, clip_len=clip_len,
+            frame_sample_rate=frame_sample_rate, crop_size=crop_size, short_side_size=short_side_size,
+            new_height=new_height, new_width=new_width, keep_aspect_ratio=keep_aspect_ratio,
+            num_segment=num_segment, num_crop=num_crop, test_num_segment=test_num_segment, 
+            test_num_crop=test_num_crop, file_ext='mp4', task='gaze_regression'
+        )
+        self.h5_dir = h5_dir  # Directory containing h5 files
+        self.predict_last_frame = predict_last_frame
+        
+        # Parse annotation format: assuming "video_path frame_idx"
+        # You may need to adjust this based on your annotation format
+        self.video_frame_pairs = []
+        for i, sample in enumerate(self.dataset_samples):
+            try:
+                if ' ' in sample:
+                    video_path, frame_idx = sample.rsplit(' ', 1)
+                    self.video_frame_pairs.append((video_path, int(frame_idx)))
+                else:
+                    # If no frame index, try to use label as frame index if it's numeric
+                    if hasattr(self, 'label_array') and i < len(self.label_array):
+                        try:
+                            frame_idx = int(self.label_array[i])
+                            self.video_frame_pairs.append((sample, frame_idx))
+                        except (ValueError, TypeError):
+                            # If label is not numeric, use the last frame (None)
+                            self.video_frame_pairs.append((sample, None))
+                    else:
+                        # Default to None (will use last frame)
+                        self.video_frame_pairs.append((sample, None))
+            except Exception as e:
+                print(f"Error parsing sample {i}: {sample}, error: {e}")
+                # Default fallback
+                self.video_frame_pairs.append((sample, None))
+        
+        print(f"Parsed {len(self.video_frame_pairs)} video-frame pairs")
+        if len(self.video_frame_pairs) > 0:
+            print(f"First few pairs: {self.video_frame_pairs[:3]}")
+
+    def get_h5_path(self, video_path):
+        """Get corresponding h5 file path for a video"""
+        if self.h5_dir is None:
+            # Assume h5 file is in the same directory as video
+            h5_path = video_path.replace('.mp4', '.h5')
+            if not os.path.exists(h5_path):
+                h5_path = video_path.replace('_face.mp4', '.h5')
+        else:
+            # Get video filename and construct h5 path
+            video_name = os.path.basename(video_path).replace('.mp4', '.h5')
+            h5_path = os.path.join(self.h5_dir, video_name)
+        return h5_path
+
+    def load_video(self, sample, sample_rate_scale=1):
+        """Load video clip and corresponding labels from EVE dataset"""
+        video_path, frame_idx = sample
+        
+        if not os.path.exists(video_path):
+            print(f"Video file does not exist: {video_path}")
+            return [], None
+        
+        h5_path = self.get_h5_path(video_path)
+        if not os.path.exists(h5_path):
+            print(f"H5 file does not exist: {h5_path}")
+            return [], None
+        
+        try:
+            vr = VideoReaderEVE(video_path, h5_path, 
+                               clip_len=self.clip_len, 
+                               frame_sample_rate=self.frame_sample_rate)
+            
+            frames, labels = vr.load_clip(frame_idx)
+            # print(f"Loaded {len(frames)} frames from {video_path} with frame index {frame_idx}")
+            # print(f"Labels loaded: {labels}")
+            
+            # Extract the target label (e.g., gaze direction from last frame)
+            target_label = None
+            if labels and len(labels) > 0:
+                # Example: use combined gaze direction as target
+                # You may need to adjust this based on your specific needs
+                if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
+                    left_gaze = labels['left_g_tobii'][-1]  # Last frame
+                    right_gaze = labels['right_g_tobii'][-1]
+                    # Average left and right gaze
+                    target_label = (left_gaze + right_gaze) / 2.0
+                elif 'PoG_px_tobii' in labels:
+                    target_label = labels['PoG_px_tobii'][-1]  # Last frame PoG
+                    
+            return frames, target_label
+            
+        except Exception as e:
+            print(f"Error loading EVE video from {video_path}: {e}")
+            return [], None
+
+    def __getitem__(self, index):
+        # print(f"==> Note: Getting item {index} in VideoRegDatasetEVE")
+        cfg = get_cfg()
+        if self.mode == 'train':
+            max_retries = 5  # 最大重试次数
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    sample = self.video_frame_pairs[index]
+                    # print(f"Loading training sample {index}: {sample}")
+                    buffer, target_label = self.load_video(sample, sample_rate_scale=1)
+                    
+                    if len(buffer) > 0 and target_label is not None:
+                        # 成功加载数据，跳出循环
+                        break
+                    else:
+                        print(f"Empty buffer or no label for sample {index}: {sample}")
+                        
+                except Exception as e:
+                    print(f"Error loading video {sample}: {e}")
+                
+                # 重试：选择下一个样本
+                retry_count += 1
+                if retry_count < max_retries:
+                    index = (index + 1) % self.__len__()  # 顺序尝试下一个样本
+                    print(f"Retrying with sample {index} (attempt {retry_count + 1}/{max_retries})")
+            
+            # 如果所有重试都失败，创建dummy数据
+            if retry_count >= max_retries:
+                print(f"Failed to load any valid sample after {max_retries} attempts, creating dummy data")
+                dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
+                buffer = [dummy_img] * self.clip_len
+                target_label = np.zeros(2)  # Dummy 2D gaze direction
+
+            # Apply resize transformation
+            buffer = self.data_resize(buffer)
+            
+            # Apply data augmentation
+            if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+                frame_list = []
+                label_list = []
+                index_list = []
+                for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
+                    new_frames = self._aug_frame(buffer)
+                    frame_list.append(new_frames)
+                    label_list.append(target_label)
+                    index_list.append(index)
+                return frame_list, label_list, index_list, {}
+            else:
+                buffer = self._aug_frame(buffer)
+
+            # Return frames with corresponding label
+            return buffer, target_label, index, {}
+
+        elif self.mode == 'validation':
+            sample = self.video_frame_pairs[index]
+            buffer, target_label = self.load_video(sample)
+            
+            if len(buffer) == 0 or target_label is None:
+                print(f"Warning: Empty buffer or missing label for validation sample {sample}")
+                # Create dummy data instead of recursion
+                dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
+                buffer = [dummy_img] * self.clip_len
+                target_label = np.zeros(2)  # Dummy 2D gaze direction
+                
+            buffer = self.data_transform(buffer)
+            return buffer, target_label, f"{sample[0]}_{sample[1]}"
+
+        elif self.mode == 'test':
+            sample = self.video_frame_pairs[index] 
+            chunk_nb, split_nb = self.test_seg[index]
+            buffer, target_label = self.load_video(sample)
+
+            if len(buffer) == 0 or target_label is None:
+                print(f"Warning: Empty buffer or missing label for test sample {sample}")
+                # Create dummy data instead of recursion
+                dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
+                buffer = [dummy_img] * self.clip_len
+                target_label = np.zeros(2)  # Dummy 2D gaze direction
+
+            buffer = self.data_resize(buffer)
+            if isinstance(buffer, list):
+                buffer = np.stack(buffer, 0)
+
+            buffer = self.data_transform(buffer)
+            return buffer, target_label, f"{sample[0]}_{sample[1]}", chunk_nb, split_nb
         else:
             raise NameError('mode {} unknown'.format(self.mode))
 

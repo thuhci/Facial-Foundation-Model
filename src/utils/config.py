@@ -28,6 +28,10 @@ _C.MODEL.USE_MEAN_POOLING = False
 _C.MODEL.INIT_SCALE = 0.001
 _C.MODEL.WITH_CP = False
 _C.MODEL.COS_ATTN = False
+_C.MODEL.KEEP_TEMPORAL_DIM = False  # Whether to keep temporal dimension in output
+
+# patch embedding configuration
+_C.MODEL.USE_ENHANCED_PATCH_EMBED = False  # Use enhanced patch embedding for better performance
 
 # Masking configuration
 _C.MODEL.MASK_TYPE = 'tube'
@@ -62,6 +66,7 @@ _C.PRETRAINING.TARGET_DIFF_WEIGHT = None
 _C.DATA = CN()
 _C.DATA.DATASET_NAME = 'Kinetics-400'
 _C.DATA.DATA_PATH = '/path/to/data'
+_C.DATA.TASK = 'class'
 _C.DATA.EVAL_DATA_PATH = None
 _C.DATA.NUM_CLASSES = 400
 _C.DATA.NUM_SEGMENTS = 1

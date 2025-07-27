@@ -130,7 +130,7 @@ class TrainingEngine:
         targets = targets.to(self.device, non_blocking=True)
         
         # Ensure correct data types
-        if self.cfg.DATA.DATASET_NAME == 'Gaze360':
+        if self.cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
         else:
             targets = targets.long()   # Classification task
@@ -156,23 +156,32 @@ class TrainingEngine:
         """Task-specific forward pass."""
         outputs = self.model(samples)
         
-        if self.cfg.DATA.DATASET_NAME == 'Gaze360':
-            if self.cfg.GAZE.USE_L2CS:
-                # L2CS mode
-                if isinstance(outputs, dict):
-                    total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
-                    return total_loss, outputs
+        if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
+            raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
+        
+        if self.cfg.DATA.TASK == 'regression':
+            if self.cfg.DATA.DATASET_NAME == 'Gaze360':
+                if self.cfg.GAZE.USE_L2CS:
+                    # L2CS mode
+                    if isinstance(outputs, dict):
+                        total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
+                        return total_loss, outputs
+                    else:
+                        raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
                 else:
-                    raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
+                    # Standard gaze regression
+                    target_angles = gaze3d_to_gaze2d(targets)
+                    loss = self.criterion(outputs, target_angles)
+                    return loss, outputs
             else:
-                # Standard gaze regression
-                target_angles = gaze3d_to_gaze2d(targets)
-                loss = self.criterion(outputs, target_angles)
+                # Standard regression task
+                loss = self.criterion(outputs, targets)
                 return loss, outputs
         else:
             # Classification task
             # print("example outputs", outputs[0:5])
             # print("example targets", targets[0:5])
+            
             loss = self.criterion(outputs, targets)
             return loss, outputs
     
@@ -228,14 +237,18 @@ class TrainingEngine:
         
         # Compute accuracy
         if self.mixup_fn is None:
-            if self.cfg.DATA.DATASET_NAME == 'Gaze360':
+            if self.cfg.DATA.TASK == 'regression':
                 # For gaze estimation, compute angular error
                 # if self.cfg.GAZE.USE_L2CS:
                 #     # L2CS mode - angular error is computed in criterion
                 #     class_acc = 0.0  # Placeholder
                 # else:
                     # Standard regression mode
-                target_angles = gaze3d_to_gaze2d(targets)
+                if targets.dim() == 2 and targets.size(1) == 3:
+                    # 3D gaze vector
+                    target_angles = gaze3d_to_gaze2d(targets)
+                else:
+                    target_angles = targets
                 angular_error = compute_angular_error(output, target_angles)
                 class_acc = angular_error
                 metric_logger.update(angular_error=angular_error)
@@ -278,9 +291,13 @@ class TrainingEngine:
         
         # Compute accuracy for logging
         if self.mixup_fn is None:
-            if self.cfg.DATA.DATASET_NAME == 'Gaze360':
+            if self.cfg.DATA.TASK == 'regression':
                 if not self.cfg.GAZE.USE_L2CS:
-                    target_angles = gaze3d_to_gaze2d(targets)
+                    if targets.dim() == 2 and targets.size(1) == 3:
+                        # 3D gaze vector
+                        target_angles = gaze3d_to_gaze2d(targets)
+                    else:
+                        target_angles = targets
                     angular_error = compute_angular_error(output, target_angles)
                     self.log_writer.update(angular_error=angular_error, head="loss")
                 class_acc = 0.0  # Placeholder for gaze

@@ -126,12 +126,12 @@ system:
   log_dir: ./output/voxceleb2_pretrain_yaml_config
   
   # Distributed training
-  world_size: 1  # 设置为您的GPU数量
+  world_size: 4  # 设置为您的GPU数量
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 根据需要启用分布式训练
-  dist_backend: nccl
+  distributed: true  # 根据需要启用分布式训练
+  dist_backend: nccl  # Use NCCL for GPU training
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false
