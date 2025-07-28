@@ -100,8 +100,7 @@ class PretrainEngine:
     
     def _process_batch(self, batch) -> Tuple[torch.Tensor, torch.Tensor]:
         """Process batch data."""
-        videos, bool_masked_pos = batch
-        
+        videos, bool_masked_pos = batch 
         # Handle multiple samples
         if self.cfg.AUGMENTATION.NUM_SAMPLE > 1:
             videos = rearrange(videos, 'b c (nt t) h w -> (b nt) c t h w', 

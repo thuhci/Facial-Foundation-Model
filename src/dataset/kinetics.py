@@ -60,7 +60,8 @@ class VideoClsDataset(Dataset):
         elif (mode == 'validation'):
             self.data_transform = video_transforms.Compose([
                 video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
-                video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                # video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                video_transforms.Resize(size=(self.crop_size, self.crop_size), interpolation='bilinear'),
                 volume_transforms.ClipToTensor(),
                 video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                            std=[0.229, 0.224, 0.225])
@@ -193,10 +194,17 @@ class VideoClsDataset(Dataset):
         # T H W C -> C T H W.
         buffer = buffer.permute(3, 0, 1, 2)
         # Perform data augmentation.
-        scl, asp = (
-            [0.08, 1.0],
-            [0.75, 1.3333],
-        )
+        if cfg.DATA.TASK == 'regression':
+            # scl and asp are not used in regression task
+            scl, asp = (
+                [0.8, 1.0],
+                [0.75, 1.33],
+            )
+        else:
+            scl, asp = (
+                [0.08, 1.0],
+                [0.75, 1.3333],
+            )
 
         buffer = spatial_sampling(
             buffer,
@@ -356,7 +364,9 @@ class VideoClsDatasetFrame(Dataset):
                 video_transforms.Resize(size=(short_side_size, short_side_size), interpolation='bilinear'),
                 # me: old, may have bug (heigh != width)
                 # video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
-                video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                # video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)), # [QZK] : use resize instead !
+                # no center crop, but interpolation
+                video_transforms.Resize(size=(self.crop_size, self.crop_size), interpolation='bilinear'),
                 volume_transforms.ClipToTensor(),
                 video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                            std=[0.229, 0.224, 0.225])
@@ -515,8 +525,8 @@ class VideoClsDatasetFrame(Dataset):
         
         if cfg.DATA.TASK == 'regression':
             # scl and asp are not used in regression task
-            scl = [1.0, 1.0]
-            asp = [1.0, 1.0]
+            scl = [0.8, 1.0]
+            asp = [0.75, 1.33]
 
         buffer = spatial_sampling(
             buffer,
@@ -803,6 +813,12 @@ class VideoRegDatasetGaze360(VideoClsDatasetFrame):
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
             buffer = self.load_video(sample)
+            
+            # [DEBUG]: not use first frames:
+            # if (buffer[0] == buffer[1]):
+            #     print(f"Warning: First two frames are identical for validation sample {sample}")
+            #     index = np.random.randint(self.__len__())
+            #     return self.__getitem__(index)
             
             if len(buffer) == 0:
                 print(f"Warning: Empty buffer for validation sample {sample}")

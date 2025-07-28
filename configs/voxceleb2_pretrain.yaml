@@ -130,7 +130,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: true  # 根据需要启用分布式训练
+  distributed: false  # 根据需要启用分布式训练
   dist_backend: nccl  # Use NCCL for GPU training
   
   # DeepSpeed (advanced optimization)

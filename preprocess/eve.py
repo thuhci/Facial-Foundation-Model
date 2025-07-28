@@ -4,7 +4,7 @@ import sys
 import h5py
 
 
-data_root = "/home/qzk/EVE/eve_dataset"
+data_root = "/root/shared/GazeDatasets/eve_dataset"
 
 for split in ["train", "val"]:
 # for split in ["val"]:

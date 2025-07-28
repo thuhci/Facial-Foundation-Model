@@ -47,7 +47,8 @@ augmentation:
   num_sample: 1  # Disabled for gaze estimation
   
   # Auto augmentation (disabled for gaze)
-  auto_augment: rand-m0-n0-mstd0.5-inc0
+  auto_augment: rand-m7-n4-mstd0.5-inc0
+  # auto_augment: rand-m7-n4-mstd0.5-inc1  # default
   # can do ablation
   
   # Mixup augmentation (disabled for gaze estimation)
@@ -59,7 +60,7 @@ augmentation:
   mixup_mode: batch
   
   # Random erase augmentation
-  random_erase_prob: 0.2
+  random_erase_prob: 0.25
   random_erase_mode: pixel
   random_erase_count: 1
   random_erase_split: false

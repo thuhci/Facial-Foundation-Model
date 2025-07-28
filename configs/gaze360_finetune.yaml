@@ -42,12 +42,12 @@ data:
 
 augmentation:
   # Basic augmentation
-  color_jitter: 0.0
+  color_jitter: 0.4
   train_interpolation: bicubic
   num_sample: 1  # Disabled for gaze estimation
   
   # Auto augmentation (disabled for gaze)
-  # auto_augment: null
+  auto_augment: rand-m7-n4-mstd0.5-inc0
   
   # Mixup augmentation (disabled for gaze estimation)
   mixup: 0.0
@@ -58,7 +58,7 @@ augmentation:
   mixup_mode: batch
   
   # Random erase augmentation
-  random_erase_prob: 0.0
+  random_erase_prob: 0.25
   random_erase_mode: pixel
   random_erase_count: 1
   random_erase_split: false

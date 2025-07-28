@@ -185,6 +185,13 @@ def main(args):
     # Set output directory
     cfg.SYSTEM.OUTPUT_DIR = args.output_dir
     
+    if cfg.SYSTEM.OUTPUT_DIR:
+        os.makedirs(cfg.SYSTEM.OUTPUT_DIR, exist_ok=True)
+        cfg_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, 'config.yaml')
+        with open(cfg_path, 'w') as f:
+            f.write(cfg.dump())
+        print(f"Configuration saved to {cfg_path}")
+    
     # Setup distributed training AFTER loading config
     if cfg.SYSTEM.DISTRIBUTED:
         print(f"Setting up distributed training with backend: {cfg.SYSTEM.DIST_BACKEND}")

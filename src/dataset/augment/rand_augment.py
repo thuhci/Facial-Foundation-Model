@@ -30,6 +30,7 @@ import random
 import re
 import PIL
 from PIL import Image, ImageEnhance, ImageOps
+from src.utils.config import get_cfg    
 
 _PIL_VER = tuple([int(x) for x in PIL.__version__.split(".")[:2]])
 
@@ -401,6 +402,25 @@ _RAND_TRANSFORMS = [
 ]
 
 
+_RAND_TRANSFORMS_FOR_REGRESSION = [
+    "AutoContrast",
+    "Equalize",
+    "Invert",
+    # "Rotate",
+    "Posterize",
+    "Solarize",
+    "SolarizeAdd",
+    "Color",
+    "Contrast",
+    "Brightness",
+    "Sharpness",
+    # "ShearX",
+    # "ShearY",
+    "TranslateXRel",
+    "TranslateYRel",
+]
+
+
 _RAND_INCREASING_TRANSFORMS = [
     "AutoContrast",
     "Equalize",
@@ -453,6 +473,10 @@ def _select_rand_weights(weight_idx=0, transforms=None):
 def rand_augment_ops(magnitude=10, hparams=None, transforms=None):
     hparams = hparams or _HPARAMS_DEFAULT
     transforms = transforms or _RAND_TRANSFORMS
+    cfg = get_cfg()
+    if cfg.DATA.TASK == "regression":
+        transforms = _RAND_TRANSFORMS_FOR_REGRESSION
+    # print("[DEBUG TRANSFORMS] transforms:", transforms)
     return [
         AugmentOp(name, prob=0.5, magnitude=magnitude, hparams=hparams)
         for name in transforms
@@ -496,10 +520,12 @@ def rand_augment_transform(config_str, hparams):
     :param hparams: Other hparams (kwargs) for the RandAugmentation scheme
     :return: A PyTorch compatible Transform
     """
+    cfg = get_cfg()
     magnitude = _MAX_LEVEL  # default to _MAX_LEVEL for magnitude (currently 10)
     num_layers = 2  # default to 2 ops per image
     weight_idx = None  # default to no probability weights for op choice
-    transforms = _RAND_TRANSFORMS
+    transforms = _RAND_TRANSFORMS if cfg.DATA.TASK == "classification" else _RAND_TRANSFORMS_FOR_REGRESSION
+    # [QZK] for regression, we don't hope to use rotation, shear, etc.
     config = config_str.split("-")
     assert config[0] == "rand"
     config = config[1:]

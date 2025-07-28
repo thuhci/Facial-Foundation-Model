@@ -7,3 +7,5 @@ Gaze360/
 *.pth
 __pycache__
 **/discarded*.py
+debug_data/
+*.txt
