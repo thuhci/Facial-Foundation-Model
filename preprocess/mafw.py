@@ -10,7 +10,7 @@ video_dir = os.path.join(data_path, 'data/frames')
 assert len(sys.argv) > 1, 'Error: please specify split number (1-5)!'
 split = f'{sys.argv[1]}'
 
-save_dir = f'../saved/data/mafw/single/split0{split}'
+save_dir = f'saved/data/mafw/single/split0{split}'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 

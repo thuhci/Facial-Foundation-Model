@@ -3,13 +3,13 @@ import numpy as np
 import cv2
 from PIL import Image
 from timm.models import create_model
-from utils import load_state_dict
+from src.utils import load_state_dict
 import torchvision  as transforms
-import modeling_finetune
-from kinetics import VideoClsDataset, VideoMAE, VideoClsDatasetFrame
+from src.models import modeling_finetune
+from src.dataset.kinetics import VideoClsDataset, VideoMAE, VideoClsDatasetFrame
 import video_transforms
 import matplotlib.pyplot as plt
-import volume_transforms
+from src.dataset.augment import volume_transforms
 # from pathlib import Path
 from facenet_pytorch import MTCNN
 from datetime import datetime

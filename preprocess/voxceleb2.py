@@ -3,9 +3,9 @@ import os
 import glob
 import decord
 
-data_path = '/data/AC/dataset/VoxCeleb2/video/file~/dev/mp4'
+data_path = 'data/voxceleb2'
 
-save_dir = f'../saved/data/voxceleb2/'
+save_dir = f'saved/data/voxceleb2/'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 

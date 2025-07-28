@@ -7,14 +7,14 @@
 Dynamic Facial Expression Recognition (DFER) is facing **supervised dillema**. On the one hand, current efforts in DFER focus on developing *various* deep supervised models, but only achieving *incremental* progress which is mainly attributed to the *longstanding lack* of large-scale high-quality datasets. On the other hand, due to the *ambiguity* and *subjectivity* in facial expression perception, acquiring large-scale high-quality DFER samples is pretty *time-consuming* and *labor-intensive*. Considering that there are massive unlabeled facial videos on the Internet, this work aims to **explore a new way** (i.e., self-supervised learning) which can fully exploit large-scale *unlabeled* data to largely advance the development of DFER.
 
 <p align="center">
-  <img src="figs/Overview.png" width=50%> <br>
+  <img src="docs/figs/Overview.png" width=50%> <br>
   Overview of our MAE-DFER.
 </p>
 
 Inspired by recent success of VideoMAE, MAE-DFER makes an early attempt to devise a novel masked autoencoder based self-supervised framework for DFER. It improves VideoMAE by developing an *efficient* LGI-Former as the encoder and introducing *joint* masked appearance and motion modeling. With these two core designs, MAE-DFER *largely* reduces the computational cost (about 38% FLOPs) during fine-tuning while having comparable or even *better* performance.
 
 <p align="center">
-  <img src="figs/LGI-Former.png" width=100%> <br>
+  <img src="docs/figs/LGI-Former.png" width=100%> <br>
   The architecture of LGI-Former.
 </p>
 <!-- ![LGI-Former](figs/LGI-Former.png) -->
@@ -79,7 +79,9 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
 - VoxCeleb2
 
     ```
-    sh scripts/voxceleb2/pretrain_local_global_attn_depth16_region_size2510_with_diff_target_102.sh
+    python run_pretraining_with_yacs.py \
+    --config configs/voxceleb2_pretrain.yaml \
+    --output_dir output/voxceleb2_pretrain/ 
     ```
     
     You can download our pre-trained model on VoxCeleb2 from [here](https://drive.google.com/file/d/1nzvMITUHic9fKwjQ7XLcnaXYViWTawRv/view?usp=sharing) and put it into [this folder](saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170).
@@ -91,12 +93,14 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
 - DFEW
 
     ```
-    sh scripts/dfew/finetune_local_global_attn_depth16_region_size2510_with_diff_target_164.sh
+    python run_finetuning_with_yacs.py \
+    --config configs/dfew_finetune.yaml \
+    --output_dir output/dfew_finetune/ \
     ```
   
     <!--Our running log file can be found in [this file](logs/dfew.out). -->
 
-    The fine-tuned checkpoints and logs across five folds on DFEW are provided as follows: 
+    <!-- The fine-tuned checkpoints and logs across five folds on DFEW are provided as follows: 
     |  Fold    | UAR        | WR       |      Fine-tuned   Model            |
     | :------: | :--------: | :------: | :-----------------------:          |
     |  1       | 62.59      | 74.88    | [log](https://drive.google.com/file/d/1dYhJiEm56V1ZwJyj-rvC8TjdmrUMa0hO/view?usp=sharing) / [checkpoint](https://drive.google.com/file/d/1wRxwEZlrc3z3DqQ84xm_olmqRsj2obH3/view?usp=sharing) | 
@@ -104,31 +108,34 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
     |  3       | 64.00      | 74.91    | [log](https://drive.google.com/file/d/1c-3sC4menIzphya-y3iZ-lT-54Ls-9Yv/view?usp=sharing) / [checkpoint](https://drive.google.com/file/d/1FPKxBoGO3VXvLhcHY8iOPb9lQPi0_C1z/view?usp=sharing) | 
     |  4       | 63.07      | 74.05    | [log](https://drive.google.com/file/d/1ZdadMpksJtUUTx6N2Fa6LI91qs7GV_S2/view?usp=sharing) / [checkpoint](https://drive.google.com/file/d/1yFDc1n8SaTEQWrVX8k65loQm45rfwQeO/view?usp=sharing) | 
     |  5       | 65.42      | 75.81    | [log](https://drive.google.com/file/d/18KnsGWZlgN3CZvfjs1UjH4E2AqVltsda/view?usp=sharing) / [checkpoint](https://drive.google.com/file/d/1wmXO4M2kjpAOnvof8CmpJE6wUrxMUOgw/view?usp=sharing) |
-    |  Total   | 63.41      | 74.43    | - |
+    |  Total   | 63.41      | 74.43    | - | -->
 
 - FERV39k
 
-    ```
+  Dataset not available yet.
+    <!-- ```
     sh scripts/ferv39k/finetune_local_global_attn_depth16_region_size2510_with_diff_target_164.sh
-    ```
+    ``` -->
   
     <!--Our running log file can be found in [this file](logs/ferv39k.out). -->
     
-    The fine-tuned checkpoints and logs on FERV39k are provided as follows:
+    <!-- The fine-tuned checkpoints and logs on FERV39k are provided as follows:
     |  Version    | UAR        | WR       |      Fine-tuned   Model            |
     | :------:    | :--------: | :------: | :-----------------------:          |
     |  Reproduced | 43.29      | 52.50    | [log](https://drive.google.com/file/d/1wnr7c9P43UtQ9wCzOiqGCYmaxkoXf2AE/view?usp=sharing) / [checkpoint](https://drive.google.com/file/d/1vq9WxuV229spEX7JQCMTluLXvvefLRzq/view?usp=sharing) |
     |  Reported   | 43.12      | 52.07    | [log](logs/ferv39k.out) / -        | 
   
-    Note that we lost the original ckpt for this dataset. However, the reproduced result is slightly better than that reported in the paper.
+    Note that we lost the original ckpt for this dataset. However, the reproduced result is slightly better than that reported in the paper. -->
 - MAFW
 
     ```
-    sh scripts/mafw/finetune_local_global_attn_depth16_region_size2510_with_diff_target_164.sh
+    python run_finetuning_with_yacs.py \
+    --config configs/mafw_finetune.yaml \
+    --output_dir output/mafw_finetune/
     ```
     
     <!--Our running log file can be found in [this file](logs/mafw.out). -->
-
+<!-- 
     The fine-tuned checkpoints and logs across five folds on MAFW are provided as follows: 
     |  Fold    | UAR        | WR       |      Fine-tuned   Model            |
     | :------: | :--------: | :------: | :-----------------------:          |
@@ -140,11 +147,22 @@ Note that, `label` for the pre-training dataset (i.e., VoxCeleb2) is dummy label
     |  Total (Reproduced)   | 42.36      | 55.03    | - |
     |  Total (Reported)     | 41.62      | 54.31    | - |
 
-    Note that we lost the original ckpts for this dataset. However, the reproduced result is slightly better than that reported in the paper.
+    Note that we lost the original ckpts for this dataset. However, the reproduced result is slightly better than that reported in the paper. -->
 
 ### ↕️ Demo
-Place the fine-tuned model in `checkpoint/` to demo.
-  ```
-  python demo.py
-  ```
-The output will be saved in `output/`
+Not available yet.
+
+
+## To finetune the model for Gaze 360 dataset
+
+### Dataset preparation
+1. Download the Gaze 360 dataset from [Gaze 360](https://gaze360.csail.mit.edu/) to the current folder.
+2. Run the [preprocess/data_prepocessing_gaze360.py](./preprocess/data_processing_gaze360.py) script to normalize the dataset and labels.
+3. Run the [preprocess/preprocess_gaze360.py](./preprocess/gaze360.py) to align the dataset labels, which will be generated to `saved/data/gaze360/`.
+
+### Script
+```bash
+python run_finetuning_with_yacs.py  \
+ --config configs/gaze360_finetune.yaml  \
+ --output_dir output/gaze360_finetune/ 
+```

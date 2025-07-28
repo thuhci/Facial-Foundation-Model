@@ -1,0 +1,697 @@
+#!/usr/bin/env python3
+"""
+Clean training script using YACS configuration system.
+Refactored version with global configuration management.
+"""
+
+import os
+import sys
+import argparse
+import datetime
+import numpy as np
+import time
+import torch
+import torch.backends.cudnn as cudnn
+import json
+from pathlib import Path
+from collections import OrderedDict
+from functools import partial
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from timm.models import create_model
+from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+from timm.scheduler import create_scheduler
+from src.optim.optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
+
+from timm.utils import ModelEma
+
+from src.utils.config import get_cfg, merge_config_file, freeze_cfg, load_and_freeze_config
+from src.engine.train_engine import TrainingEngine
+from src.engine.val_engine import ValidationEngine
+from src.utils.evaluation import merge_distributed_results
+from src.optim.mixup import Mixup
+# from src.optim.optim_factory import LayerDecayValueAssigner
+from src.dataset.datasets import build_dataset
+from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
+from src.utils.utils import multiple_samples_collate
+from src.utils.logger import TensorboardLogger
+from src.utils import utils
+
+from src.models import ViT, ViT_pretrain, layers
+
+def get_args_parser():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser('Training script with YACS configuration', add_help=False)
+    
+    # Basic arguments
+    parser.add_argument('--config', default='', type=str, help='Path to YAML config file', required=True)
+    parser.add_argument('--output_dir', default='./output', type=str, help='Output directory', required=True)
+    parser.add_argument('--resume', default='', type=str, help='Resume from checkpoint')
+    parser.add_argument('--seed', default=0, type=int, help='Random seed')
+    parser.add_argument('--eval', action='store_true', help='Evaluation mode')
+    parser.add_argument('--dist_eval', action='store_true', help='Distributed evaluation')
+    
+    
+    
+    return parser
+
+
+def create_data_loaders():
+    """Create data loaders from global configuration."""
+    cfg = get_cfg()
+    
+    # Create dataset
+    dataset_train, nb_classes = build_dataset(is_train=True, test_mode=False)
+    dataset_val, nb_classes = build_dataset(is_train=False, test_mode=False)
+    
+    # Create data loaders
+    if cfg.SYSTEM.DISTRIBUTED:
+        num_tasks = utils.get_world_size()
+        global_rank = utils.get_rank()
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+        )
+        sampler_val = torch.utils.data.DistributedSampler(
+            dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
+        )
+    else:
+        sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    
+    if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+        collate_func = partial(multiple_samples_collate, fold=False)
+    else:
+        collate_func = None
+    
+    # Create data loaders
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        sampler=sampler_train,
+        batch_size=cfg.DATA.BATCH_SIZE,
+        num_workers=cfg.DATA.NUM_WORKERS,
+        pin_memory=cfg.DATA.PIN_MEMORY,
+        drop_last=True,
+        collate_fn=collate_func
+    )
+    # print(f"Data loader train size: {len(data_loader_train)}")
+    
+    data_loader_val = torch.utils.data.DataLoader(
+        dataset_val,
+        sampler=sampler_val,
+        batch_size=cfg.DATA.BATCH_SIZE,
+        num_workers= cfg.DATA.NUM_WORKERS,
+        pin_memory= cfg.DATA.PIN_MEMORY,
+        drop_last=False,
+        collate_fn=collate_func
+    )
+    # print(f"Data loader val size: {len(data_loader_val)}")
+    
+    return data_loader_train, data_loader_val
+
+
+def create_model_from_config():
+    """Create model from global configuration."""
+    cfg = get_cfg()
+    
+    # Handle model name variations
+    model_name = cfg.MODEL.NAME
+    if 'no_depth' in model_name and cfg.MODEL.DEPTH is not None:
+        print(f"==> Note: use custom model depth={cfg.MODEL.DEPTH}!")
+        model = create_model(
+            model_name,
+            pretrained=False,
+            num_classes=cfg.DATA.NUM_CLASSES,
+            all_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
+            tubelet_size=cfg.MODEL.TUBELET_SIZE,
+            drop_rate=cfg.MODEL.DROP,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
+            attn_drop_rate=cfg.MODEL.ATTN_DROP_RATE,
+            drop_block_rate=None,
+            use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
+            init_scale=cfg.MODEL.INIT_SCALE,
+            depth = cfg.MODEL.DEPTH,
+            attn_type=cfg.MODEL.ATTN_TYPE,
+            lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
+            lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
+            lg_attn_param_sharing_first_third=cfg.MODEL.LG_ATTN_PARAM_SHARING_FIRST_THIRD,
+            lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
+            lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
+            lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            keep_temporal_dim  = cfg.MODEL.KEEP_TEMPORAL_DIM,
+        )
+    else:
+        model = create_model(
+            model_name,
+            pretrained=False,
+            num_classes=cfg.DATA.NUM_CLASSES,
+            all_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
+            tubelet_size=cfg.MODEL.TUBELET_SIZE,
+            drop_rate=cfg.MODEL.DROP,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
+            attn_drop_rate=cfg.MODEL.ATTN_DROP_RATE,
+            use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
+            init_scale=cfg.MODEL.INIT_SCALE,
+            depth = cfg.MODEL.DEPTH,
+            attn_type=cfg.MODEL.ATTN_TYPE,
+            lg_region_size=cfg.MODEL.LG_REGION_SIZE, lg_first_attn_type=cfg.MODEL.LG_FIRST_ATTN_TYPE,
+            lg_third_attn_type=cfg.MODEL.LG_THIRD_ATTN_TYPE,
+            lg_attn_param_sharing_first_third=cfg.MODEL.LG_ATTN_PARAM_SHARING_FIRST_THIRD,
+            lg_attn_param_sharing_all=cfg.MODEL.LG_ATTN_PARAM_SHARING_ALL,
+            lg_classify_token_type=cfg.MODEL.LG_CLASSIFY_TOKEN_TYPE,
+            lg_no_second=cfg.MODEL.LG_NO_SECOND, lg_no_third=cfg.MODEL.LG_NO_THIRD,
+            keep_temporal_dim  = cfg.MODEL.KEEP_TEMPORAL_DIM,
+        )
+        
+    print("model after create_model = %s" % str(model))
+        
+    model = model.float()
+
+    # 针对regression任务修改输出层
+    if cfg.DATA.TASK == 'regression':
+        in_features = model.head.in_features
+        if cfg.GAZE.USE_L2CS:
+            # L2CS: 两个分类头，每个有 num_bins 个输出
+            # [DEBUG] change into ModuleList further, now like this for debug
+            model.head = torch.nn.ModuleDict({
+                'pitch': torch.nn.Linear(in_features, cfg.GAZE.NUM_BINS),
+                'yaw': torch.nn.Linear(in_features, cfg.GAZE.NUM_BINS)
+            })
+        else:
+            # 原始方式：直接回归2个角度
+            model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+    else:
+        model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
+    
+    patch_size = model.patch_embed.patch_size
+    print("Patch size = %s" % str(patch_size))
+    # args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
+    # args.patch_size = patch_size
+    # cfg.MODEL.PATCH_SIZE = patch_size
+    cfg.MODEL.WINDOW_SIZE = (cfg.DATA.NUM_FRAMES // cfg.MODEL.TUBELET_SIZE,
+                             cfg.MODEL.INPUT_SIZE // patch_size[0],
+                                cfg.MODEL.INPUT_SIZE // patch_size[1])
+    cfg.MODEL.PATCH_SIZE = patch_size
+
+    if cfg.TRAINING.FINETUNE:
+        if cfg.TRAINING.FINETUNE.startswith('https://'):
+            checkpoint = torch.hub.load_state_dict_from_url(
+                cfg.TRAINING.FINETUNE, map_location='cpu', check_hash=True)
+        else:
+            checkpoint = torch.load(cfg.TRAINING.FINETUNE, map_location='cpu', weights_only=False)
+
+        print("Load ckpt from %s" % cfg.TRAINING.FINETUNE)
+        checkpoint_model = None
+        for model_key in cfg.MODEL.MODEL_KEY.split('|'):
+            if model_key in checkpoint:
+                checkpoint_model = checkpoint[model_key]
+                print("Load state_dict by model_key = %s" % model_key)
+                break
+        if checkpoint_model is None:
+            checkpoint_model = checkpoint
+        state_dict = model.state_dict()
+        for k in ['head.weight', 'head.bias']:
+            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint_model[k]
+
+        all_keys = list(checkpoint_model.keys())
+        new_dict = OrderedDict()
+        for key in all_keys:
+            if key.startswith('backbone.'):
+                new_dict[key[9:]] = checkpoint_model[key]
+            elif key.startswith('encoder.'):
+                new_dict[key[8:]] = checkpoint_model[key]
+            else:
+                new_dict[key] = checkpoint_model[key]
+        checkpoint_model = new_dict
+
+        # interpolate position embedding
+        if 'pos_embed' in checkpoint_model:
+            pos_embed_checkpoint = checkpoint_model['pos_embed']
+            embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
+            num_patches = model.patch_embed.num_patches #
+            num_extra_tokens = model.pos_embed.shape[-2] - num_patches # 0/1
+
+            # height (== width) for the checkpoint position embedding
+            orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(cfg.DATA.NUM_FRAMES // model.patch_embed.tubelet_size)) ** 0.5)
+            # height (== width) for the new position embedding
+            new_size = int((num_patches // (cfg.DATA.NUM_FRAMES // model.patch_embed.tubelet_size) )** 0.5)
+            # class_token and dist_token are kept unchanged
+            if orig_size != new_size:
+                print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+                extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+                # only the position tokens are interpolated
+                pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+                # B, L, C -> BT, H, W, C -> BT, C, H, W
+                pos_tokens = pos_tokens.reshape(-1, cfg.DATA.NUM_FRAMES // model.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
+                pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+                pos_tokens = torch.nn.functional.interpolate(
+                    pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+                # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
+                pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, cfg.DATA.NUM_FRAMES // model.patch_embed.tubelet_size, new_size, new_size, embedding_size)
+                pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
+                new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+                checkpoint_model['pos_embed'] = new_pos_embed
+
+        utils.load_state_dict(model, checkpoint_model, prefix=cfg.MODEL.PREFIX)
+
+    # print("Model = %s" % str(model_without_ddp))
+    # print('number of params:', n_parameters)
+    
+    return model
+
+
+def create_optimizer_from_config(model):
+    """Create optimizer from global configuration."""
+    cfg = get_cfg()
+    
+    # Get layer assignments for layer decay (like original implementation)
+    model_without_ddp = model
+    num_layers = model_without_ddp.get_num_layers()
+    if cfg.OPTIMIZATION.LAYER_DECAY < 1.0:
+        assigner = LayerDecayValueAssigner(
+            list(cfg.OPTIMIZATION.LAYER_DECAY ** (num_layers + 1 - i) for i in range(num_layers + 2))
+        )
+    else:
+        assigner = None
+        
+    if assigner is not None:
+        print("Assigned values = %s" % str(assigner.values))
+        
+    skip_weight_decay_list = model.no_weight_decay()
+    print("Skip weight decay list: ", skip_weight_decay_list)
+
+    optimizer = create_optimizer(
+        model=model_without_ddp, skip_list=skip_weight_decay_list,
+        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
+        get_layer_scale=assigner.get_scale if assigner is not None else None)
+    
+    return optimizer
+
+
+def create_criterion_from_config():
+    """Create loss criterion from global configuration."""
+    cfg = get_cfg()
+    
+    if cfg.DATA.TASK == 'regression':
+        if cfg.GAZE.USE_L2CS:
+            from src.utils.gaze import l2cs_criterion
+            criterion = l2cs_criterion
+        else:
+            criterion = torch.nn.MSELoss()
+    else:
+        # Classification task
+        mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
+        if mixup_active:
+            # Mixup mode
+            criterion = SoftTargetCrossEntropy()
+        elif cfg.AUGMENTATION.LABEL_SMOOTHING > 0:
+            # Label smoothing
+            criterion = LabelSmoothingCrossEntropy(smoothing=cfg.AUGMENTATION.LABEL_SMOOTHING)
+        else:
+            # Standard cross entropy
+            criterion = torch.nn.CrossEntropyLoss()
+    
+    return criterion
+
+
+def create_mixup_from_config():
+    """Create mixup function from global configuration."""
+    cfg = get_cfg()
+    
+    mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
+    if mixup_active:
+        mixup_fn = Mixup(
+            mixup_alpha=cfg.AUGMENTATION.MIXUP,
+            cutmix_alpha=cfg.AUGMENTATION.CUTMIX,
+            cutmix_minmax=cfg.AUGMENTATION.CUTMIX_MINMAX,
+            prob=cfg.AUGMENTATION.MIXUP_PROB,
+            switch_prob=cfg.AUGMENTATION.MIXUP_SWITCH_PROB,
+            mode=cfg.AUGMENTATION.MIXUP_MODE,
+            label_smoothing=cfg.AUGMENTATION.LABEL_SMOOTHING,
+            num_classes=cfg.DATA.NUM_CLASSES
+        )
+    else:
+        mixup_fn = None
+    
+    return mixup_fn
+
+
+def create_scheduler_from_config(optimizer, num_training_steps_per_epoch):
+    """Create learning rate scheduler from global configuration."""
+    cfg = get_cfg()
+    
+    # Create scheduler
+    # lr_scheduler, _ = create_scheduler(cfg.OPTIMIZATION, optimizer)
+    
+    # Create learning rate schedule values
+    if cfg.OPTIMIZATION.SCHED == 'cosine':
+        lr_schedule_values = utils.cosine_scheduler(
+            cfg.OPTIMIZATION.LR,
+            cfg.OPTIMIZATION.MIN_LR,
+            cfg.TRAINING.EPOCHS,
+            num_training_steps_per_epoch,
+            warmup_epochs=cfg.OPTIMIZATION.WARMUP_EPOCHS,
+            warmup_steps=cfg.OPTIMIZATION.WARMUP_STEPS
+        )
+    else:
+        lr_schedule_values = None
+    
+    # Create weight decay schedule values
+    if cfg.OPTIMIZATION.WEIGHT_DECAY_END is not None:
+        wd_schedule_values = utils.cosine_scheduler(
+            cfg.OPTIMIZATION.WEIGHT_DECAY,
+            cfg.OPTIMIZATION.WEIGHT_DECAY_END,
+            cfg.TRAINING.EPOCHS,
+            num_training_steps_per_epoch
+        )
+    else:
+        wd_schedule_values = None
+    
+    return lr_schedule_values, wd_schedule_values
+
+
+def main(args):
+    """Main training function."""
+    # Load configuration FIRST
+    if args.config:
+        print(f"Loading configuration from: {args.config}")
+        cfg = get_cfg()
+        merge_config_file(cfg, args.config)
+    else:
+        print("Using default configuration")
+        cfg = get_cfg()
+        
+    if args.eval:
+        cfg.TRAINING.EVAL_ONLY = True
+    
+    # Set output directory
+    cfg.SYSTEM.OUTPUT_DIR = args.output_dir
+    
+    # save config to output directory
+    if cfg.SYSTEM.OUTPUT_DIR:
+        os.makedirs(cfg.SYSTEM.OUTPUT_DIR, exist_ok=True)
+        cfg_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, 'config.yaml')
+        with open(cfg_path, 'w') as f:
+            f.write(cfg.dump())
+        print(f"Configuration saved to {cfg_path}")
+    
+    # Setup distributed training AFTER loading config
+    print(f"Setting up distributed training with backend: {cfg.SYSTEM.DIST_BACKEND}")
+    if cfg.SYSTEM.DISTRIBUTED:
+        utils.init_distributed_mode()
+    
+    # Update system config from utils after distributed init
+        cfg.SYSTEM.DISTRIBUTED = utils.is_dist_avail_and_initialized()
+        cfg.SYSTEM.WORLD_SIZE = utils.get_world_size()
+        cfg.SYSTEM.LOCAL_RANK = utils.get_rank()
+    
+    # Set device based on local rank
+    if torch.cuda.is_available():
+        torch.cuda.set_device(utils.get_rank())
+        device = torch.device(f'cuda:{utils.get_rank()}')
+        cfg.SYSTEM.DEVICE = f'cuda:{utils.get_rank()}'
+    else:
+        device = torch.device('cpu')
+        cfg.SYSTEM.DEVICE = 'cpu'
+    
+    print(f"Rank {utils.get_rank()}: Using device {device} with backend {cfg.SYSTEM.DIST_BACKEND}")
+    
+    # Fix seed
+    seed = args.seed + utils.get_rank()
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.cuda.manual_seed(seed)
+    
+    # Enable cudnn benchmark
+    cudnn.benchmark = True
+    
+    # Create data loaders
+    data_loader_train, data_loader_val = create_data_loaders()
+    print(f"Data loader train size: {len(data_loader_train)}")
+    print(f"Data loader val size: {len(data_loader_val)}")
+    
+    # Create model
+    model = create_model_from_config()
+    model.to(device)
+    
+    # Wrap model for distributed training BEFORE creating optimizer
+    model_without_ddp = model
+    if cfg.SYSTEM.DISTRIBUTED:
+        print(f"Rank {utils.get_rank()}: Wrapping model with DDP (backend: {cfg.SYSTEM.DIST_BACKEND})")
+        # Synchronize before DDP creation
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        
+        # DDP 参数根据后端类型调整
+        if cfg.SYSTEM.DIST_BACKEND.lower() == 'gloo':
+            # Gloo 后端不需要指定 device_ids
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                find_unused_parameters=False,
+                broadcast_buffers=True
+            )
+        else:
+            # NCCL 后端需要指定 device_ids
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, 
+                device_ids=[utils.get_rank()], 
+                output_device=utils.get_rank(),
+                find_unused_parameters=False,
+                broadcast_buffers=True
+            )
+        model_without_ddp = model.module
+        print(f"Rank {utils.get_rank()}: DDP wrapper created successfully")
+    
+    # Freeze configuration to make it immutable
+    # print("Freezing configuration...")
+    # freeze_cfg()
+    
+    # Print final configuration if main process
+    if utils.get_rank() == 0:
+        print("Final configuration:")
+        print(cfg)
+    
+    # Setup training components
+    
+    optimizer = create_optimizer_from_config(model_without_ddp)
+    criterion = create_criterion_from_config()
+    mixup_fn = create_mixup_from_config()
+    
+    # Create model EM
+    model_ema = None
+    if cfg.TRAINING.MODELEMA_:
+        model_ema = ModelEma(
+            model_without_ddp,
+            decay=cfg.TRAINING.MODEL_EMA_DECAY,
+            device='cpu' if cfg.TRAINING.MODEL_EMA_FORCE_CPU else None
+        )
+        
+    model_without_ddp = model
+    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    print("Model = %s" % str(model_without_ddp))
+    print('number of params:', n_parameters)
+    
+    # Create loss scaler
+    loss_scaler = NativeScaler()
+    
+    # Calculate effective batch size and apply LR scaling (like original implementation)
+    total_batch_size = cfg.DATA.BATCH_SIZE * cfg.TRAINING.UPDATE_FREQ * utils.get_world_size()
+    num_training_steps_per_epoch = len(data_loader_train) // cfg.TRAINING.UPDATE_FREQ
+    
+    # Apply learning rate scaling like in original implementation
+    cfg.OPTIMIZATION.LR = cfg.OPTIMIZATION.LR * total_batch_size / 256
+    cfg.OPTIMIZATION.MIN_LR = cfg.OPTIMIZATION.MIN_LR * total_batch_size / 256  
+    cfg.OPTIMIZATION.WARMUP_LR = cfg.OPTIMIZATION.WARMUP_LR * total_batch_size / 256
+    print("LR = %.8f" % cfg.OPTIMIZATION.LR)
+    print("Batch size = %d" % total_batch_size)
+    print("Update frequent = %d" % cfg.TRAINING.UPDATE_FREQ)
+    print("Number of training examples = %d" % len(data_loader_train.dataset))
+    print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
+    
+    # Create scheduler
+    lr_schedule_values, wd_schedule_values = create_scheduler_from_config(
+        optimizer, num_training_steps_per_epoch
+    )
+    
+    # Create log writer
+    log_writer = TensorboardLogger(
+        log_dir=cfg.SYSTEM.OUTPUT_DIR,
+    )
+    
+    # Create training engine
+    training_engine = TrainingEngine(
+        model, 
+        optimizer = optimizer,
+        loss_scaler = loss_scaler,
+        criterion = criterion,
+        model_ema = model_ema,
+        mixup_fn = mixup_fn,
+        log_writer = log_writer,
+        device = device,
+        )
+
+    # Create validation engine
+    validation_engine = ValidationEngine(model, device)
+    
+    # Resume from checkpoint
+    if args.resume:
+        cfg.TRAINING.RESUME = args.resume
+        utils.auto_load_model(
+            model=model, model_without_ddp=model_without_ddp,
+            optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+        # checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
+        # model_without_ddp.load_state_dict(checkpoint['model'])
+        # if not args.eval and 'optimizer' in checkpoint and 'epoch' in checkpoint:
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        #     start_epoch = checkpoint['epoch'] + 1
+        #     if 'scaler' in checkpoint:
+        #         loss_scaler.load_state_dict(checkpoint['scaler'])
+        # else:
+        #     start_epoch = 0
+    else:
+        start_epoch = 0
+    
+    # Evaluation mode
+    if args.eval:
+        test_stats = validation_engine.validate(data_loader_val)
+        print(f"Validation results: {test_stats}")
+        return
+    
+    # Training loop
+    print(f"Start training for {cfg.TRAINING.EPOCHS} epochs")
+    start_time = time.time()
+    max_accuracy = 0.0
+    best_epoch = 0
+    
+    for epoch in range(start_epoch, cfg.TRAINING.EPOCHS):
+        if cfg.SYSTEM.DISTRIBUTED:
+            data_loader_train.sampler.set_epoch(epoch)
+        
+        # Training
+        train_stats = training_engine.train_one_epoch(
+            data_loader_train,
+            epoch,
+            lr_schedule_values,
+            wd_schedule_values,
+            num_training_steps_per_epoch,
+            epoch * num_training_steps_per_epoch
+        )
+        
+        # Validation
+        test_stats = validation_engine.validate(data_loader_val)
+        
+        # Update learning rate
+        # lr_scheduler.step(epoch)
+        
+        # Save checkpoint
+        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+            checkpoint_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, f'checkpoint-{epoch}.pth')
+            # utils.save_checkpoint(
+            #     {
+            #         'model': model_without_ddp.state_dict(),
+            #         'optimizer': optimizer.state_dict(),
+            #         # 'lr_scheduler': lr_scheduler.state_dict(),
+            #         'epoch': epoch,
+            #         'scaler': loss_scaler.state_dict(),
+            #         'config': cfg,
+            #         'model_ema': model_ema.state_dict() if model_ema else None,
+            #     },
+            #     checkpoint_path
+            # )
+            utils.save_model(epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema)
+        
+        # Log stats
+        log_stats = {
+            **{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'test_{k}': v for k, v in test_stats.items()},
+            'epoch': epoch,
+            'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
+        }
+        
+        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                f.write(json.dumps(log_stats) + "\n")
+        
+        # Track best accuracy and save best model
+        if cfg.DATA.TASK == 'regression':
+            current_metric = test_stats.get('mean_angle_error', 1e8)
+            if current_metric < max_accuracy or epoch == start_epoch:
+                max_accuracy = current_metric
+                best_epoch = epoch
+                # Save best model
+                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                    utils.save_model(
+                        "best", model, model_without_ddp, optimizer, 
+                        loss_scaler, model_ema)
+        else:
+            # For classification, we can choose different metrics for best model selection
+            metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
+            current_metric = test_stats.get(metric_name, 0)
+            is_better = current_metric > max_accuracy
+            
+            if is_better or epoch == start_epoch:
+                max_accuracy = current_metric
+                best_epoch = epoch
+                # Save best model
+                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                    utils.save_model(
+                        "best", model, model_without_ddp, optimizer, 
+                        loss_scaler, model_ema)
+        
+        print(f'Max {metric_name if "metric_name" in locals() else "accuracy"}: {max_accuracy:.4f} at epoch {best_epoch}')
+    
+    # Final evaluation with detailed metrics
+    print("Performing final evaluation...")
+    final_test_stats = validation_engine.validate(data_loader_val)
+    
+    # For classification tasks, compute and save detailed metrics
+    if cfg.DATA.TASK != 'regression' and utils.is_main_process():
+        print("Computing detailed metrics...")
+        detailed_stats = validation_engine.compute_detailed_metrics(data_loader_val)
+        
+        # Save detailed results
+        final_results = {
+            'final_acc1': final_test_stats.get('acc1', 0),
+            'final_acc5': final_test_stats.get('acc5', 0),
+            'final_uar': final_test_stats.get('uar', 0),
+            'final_war': final_test_stats.get('war', 0),
+            'final_weighted_f1': final_test_stats.get('weighted_f1', 0),
+            'final_micro_f1': final_test_stats.get('micro_f1', 0),
+            'final_macro_f1': final_test_stats.get('macro_f1', 0),
+            'best_epoch': best_epoch,
+            'best_metric': max_accuracy
+        }
+        
+        print(f"Final Results:")
+        print(f"Acc@1: {final_results['final_acc1']:.4f}")
+        print(f"Acc@5: {final_results['final_acc5']:.4f}")
+        print(f"UAR: {final_results['final_uar']:.4f}")
+        print(f"WAR: {final_results['final_war']:.4f}")
+        print(f"Weighted F1: {final_results['final_weighted_f1']:.4f}")
+        print(f"Micro F1: {final_results['final_micro_f1']:.4f}")
+        print(f"Macro F1: {final_results['final_macro_f1']:.4f}")
+        
+        # Save to log file
+        if cfg.SYSTEM.OUTPUT_DIR:
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "final_results.json"), "w") as f:
+                json.dump(final_results, f, indent=2)
+                
+            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                f.write("=== FINAL RESULTS ===\n")
+                f.write(json.dumps(final_results, indent=2) + "\n")
+    
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print(f'Training time {total_time_str}')
+
+
+if __name__ == '__main__':
+    args = get_args_parser().parse_args()
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    main(args)

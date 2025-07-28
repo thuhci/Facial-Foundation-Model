@@ -19,7 +19,7 @@ OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 python -m \
         --model pretrain_videomae_base_dim512_no_depth_patch16_160 \
         --encoder_depth 16 \
         --decoder_depth 4 \
-        --batch_size 2 \
+        --batch_size 4 \
         --num_frames 16 \
         --sampling_rate 4 \
         --opt adamw \

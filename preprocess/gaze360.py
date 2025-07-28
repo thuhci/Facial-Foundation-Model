@@ -1,11 +1,11 @@
 import os
 import pandas as pd
 
-data_root = 'Gaze360/normalized_imgs'
+data_root = '/root/shared/Gaze360/normalized_imgs'
 
 for split in ["train", "val", "test"]:
 # split = "test"
-    txt_path = f"Gaze360/lbls/{split}.txt"
+    txt_path = f"/root/shared/Gaze360/lbls/{split}.txt"
 
     txt_lines = []
     # read from txt file
