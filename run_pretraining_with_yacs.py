@@ -23,7 +23,7 @@ from src.dataset.datasets import build_pretraining_dataset
 from src.engine.pretrain_engine import PretrainEngine
 from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
 from src.utils.config import get_cfg, merge_config_file, freeze_cfg, load_and_freeze_config
-from src.utils.logger import TensorboardLogger
+from src.utils.logger import create_logger, log_system_info
 from src import utils
 from src.models import ViT_pretrain, ViT, layers
 
@@ -243,11 +243,31 @@ def main(args):
     num_training_steps_per_epoch = dataset_length // cfg.DATA.BATCH_SIZE // utils.utils.get_world_size()
     
     # Setup logging
-    if utils.utils.get_rank() == 0 and cfg.SYSTEM.LOG_DIR is not None:
-        os.makedirs(cfg.SYSTEM.LOG_DIR, exist_ok=True)
-        log_writer = TensorboardLogger(log_dir=cfg.SYSTEM.LOG_DIR)
-    else:
-        log_writer = None
+    log_dir = None
+    if cfg.SYSTEM.LOG_DIR is not None:
+        log_dir = cfg.SYSTEM.LOG_DIR
+        os.makedirs(log_dir, exist_ok=True)
+    elif cfg.SYSTEM.OUTPUT_DIR:
+        log_dir = os.path.join(cfg.SYSTEM.OUTPUT_DIR, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+    
+    log_writer = create_logger(
+        log_dir=log_dir,
+        config_dict={
+            'script_type': 'pretraining',
+            'num_parameters': n_parameters,
+            'dataset_length': dataset_length,
+            'num_training_steps_per_epoch': num_training_steps_per_epoch
+        }
+    )
+    
+    # Log system information
+    log_system_info(log_writer)
+    
+    # Log model architecture
+    if utils.utils.get_rank() == 0:
+        log_writer.log_model_info(model, (cfg.DATA.BATCH_SIZE, 3, cfg.DATA.NUM_FRAMES, cfg.MODEL.INPUT_SIZE, cfg.MODEL.INPUT_SIZE))
+        log_writer.watch_model(model)
     
     # Setup distributed training
     if cfg.SYSTEM.DISTRIBUTED:
@@ -314,11 +334,20 @@ def main(args):
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      'epoch': epoch, 'n_parameters': n_parameters}
         
+        # Log training metrics to wandb/tensorboard
+        if log_writer is not None:
+            log_writer.set_step(epoch)
+            log_writer.update(head='train', step=epoch, **train_stats)
+            log_writer.update(head='epoch', step=epoch, epoch=epoch, n_parameters=n_parameters)
+            log_writer.flush()
+        
         if cfg.SYSTEM.OUTPUT_DIR and utils.utils.is_main_process():
-            if log_writer is not None:
-                log_writer.flush()
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
+    
+    # Finish wandb logging
+    if log_writer:
+        log_writer.finish()
     
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

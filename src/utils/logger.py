@@ -1,14 +1,24 @@
 import os
 import pickle
 import numpy as np
+import random
+import io
 from collections import defaultdict, deque
 import torch
 import torch.distributed as dist
 from tensorboardX import SummaryWriter
-from typing import Dict, List, Tuple, Any, Union
+from typing import Dict, List, Tuple, Any, Union, Optional
 import datetime
 from src.utils.utils import is_dist_avail_and_initialized
 import time
+
+# Import wandb with error handling
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb not available. Install with 'pip install wandb' to enable wandb logging.")
 
 
 class SmoothedValue(object):
@@ -173,12 +183,418 @@ class TensorboardLogger(object):
             if v is None:
                 continue
             if isinstance(v, torch.Tensor):
-                v = v.item()
+                if v.size() == 1:
+                    v = v.item()
+                else:
+                    continue
+                # v = v.item()
             assert isinstance(v, (float, int))
             self.writer.add_scalar(head + "/" + k, v, self.step if step is None else step)
 
     def flush(self):
         self.writer.flush()
+
+
+class WandbLogger(object):
+    """Wandb logger that integrates with the existing logging system."""
+    
+    def __init__(self):
+        self.run = None
+        self.step = 0
+        self.initialized = False
+        
+    def init_wandb(self, config_dict: Optional[Dict] = None, resume_id: Optional[str] = None):
+        """Initialize wandb run."""
+        if not WANDB_AVAILABLE:
+            print("Wandb not available, skipping wandb initialization")
+            return
+            
+        # Import config here to avoid circular imports
+        from src.utils.config import get_cfg
+        from src.utils import utils
+        
+        cfg = get_cfg()
+        
+        # Only initialize on main process
+        if utils.get_rank() != 0:
+            return
+            
+        try:
+            # Prepare config for wandb
+            wandb_config = self._prepare_config(config_dict)
+            
+            # Generate run name if not provided
+            run_name = cfg.WANDB.RUN_NAME
+            if run_name is None:
+                run_name = self._generate_run_name()
+            
+            # Initialize wandb
+            self.run = wandb.init(
+                project=cfg.WANDB.PROJECT,
+                entity=cfg.WANDB.ENTITY,
+                name=run_name,
+                tags=list(cfg.WANDB.TAGS) if cfg.WANDB.TAGS else None,
+                notes=cfg.WANDB.NOTES,
+                config=wandb_config,
+                mode=cfg.WANDB.MODE,
+                save_code=cfg.WANDB.SAVE_CODE,
+                id=resume_id,
+                resume="allow" if resume_id else None
+            )
+            
+            self.initialized = True
+            print(f"Wandb initialized: {self.run.url}")
+            
+        except Exception as e:
+            print(f"Failed to initialize wandb: {e}")
+            print("Continuing without wandb logging...")
+    
+    def watch_model(self, model: torch.nn.Module):
+        """Watch model gradients and parameters."""
+        if not self._should_log():
+            return
+            
+        try:
+            from src.utils.config import get_cfg
+            cfg = get_cfg()
+            
+            if cfg.WANDB.WATCH_MODEL and self.run is not None:
+                wandb.watch(
+                    model, 
+                    log=cfg.WANDB.WATCH_LOG,
+                    log_freq=cfg.WANDB.LOG_FREQ
+                )
+        except Exception as e:
+            print(f"Failed to watch model: {e}")
+    
+    def set_step(self, step=None):
+        """Set current step number."""
+        if step is not None:
+            self.step = step
+        else:
+            self.step += 1
+    
+    def update(self, head='scalar', step=None, **kwargs):
+        """Log metrics to wandb with head as prefix."""
+        if not self._should_log():
+            return
+            
+        try:
+            # Convert metrics to loggable format
+            processed_metrics = {}
+            for key, value in kwargs.items():
+                if value is None:
+                    continue
+                    
+                metric_name = f"{head}/{key}" if head != 'scalar' else key
+                
+                if isinstance(value, (torch.Tensor, np.ndarray)):
+                    if hasattr(value, 'numel') and value.numel() == 1:
+                        processed_metrics[metric_name] = value.item()
+                    elif hasattr(value, 'size') and value.size == 1:
+                        processed_metrics[metric_name] = value.item()
+                    else:
+                        # For multi-dimensional tensors, log as histogram
+                        if isinstance(value, torch.Tensor):
+                            processed_metrics[f"{metric_name}_hist"] = wandb.Histogram(value.detach().cpu().numpy())
+                        else:
+                            processed_metrics[f"{metric_name}_hist"] = wandb.Histogram(value)
+                elif isinstance(value, (int, float)):
+                    processed_metrics[metric_name] = value
+                else:
+                    try:
+                        processed_metrics[metric_name] = float(value)
+                    except (ValueError, TypeError):
+                        print(f"Warning: Cannot log metric {key} with value {value}")
+            
+            # Log to wandb
+            if processed_metrics:
+                self.run.log(processed_metrics, step=step or self.step)
+                
+        except Exception as e:
+            print(f"Failed to log metrics to wandb: {e}")
+    
+    def log_confusion_matrix(self, y_true: List, y_pred: List, class_names: Optional[List[str]] = None,
+                           step: Optional[int] = None, prefix: str = "val"):
+        """Log confusion matrix to wandb."""
+        if not self._should_log():
+            return
+            
+        try:
+            self.run.log({
+                f"{prefix}/confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=y_true,
+                    preds=y_pred,
+                    class_names=class_names
+                )
+            }, step=step or self.step)
+        except Exception as e:
+            print(f"Failed to log confusion matrix: {e}")
+    
+    def log_model_architecture(self, model: torch.nn.Module, input_shape: tuple):
+        """Log model architecture and parameters."""
+        if not self._should_log():
+            return
+            
+        try:
+            # Count parameters
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            
+            self.run.log({
+                "model/total_parameters": total_params,
+                "model/trainable_parameters": trainable_params,
+                "model/non_trainable_parameters": total_params - trainable_params
+            })
+            
+            # Log model summary as text
+            model_summary = str(model)
+            self.run.log({"model/architecture": wandb.Html(f"<pre>{model_summary}</pre>")})
+            
+        except Exception as e:
+            print(f"Failed to log model architecture: {e}")
+    
+    def log_checkpoint(self, checkpoint_path: str, is_best: bool = False):
+        """Log model checkpoint as wandb artifact."""
+        if not self._should_log():
+            return
+            
+        try:
+            artifact_name = f"model-checkpoint-{self.run.id}"
+            if is_best:
+                artifact_name = f"best-{artifact_name}"
+                
+            artifact = wandb.Artifact(
+                name=artifact_name,
+                type="model",
+                metadata={"epoch": self.step, "is_best": is_best}
+            )
+            
+            artifact.add_file(checkpoint_path)
+            self.run.log_artifact(artifact)
+            
+        except Exception as e:
+            print(f"Failed to log checkpoint: {e}")
+    
+    def flush(self):
+        """Flush wandb (no-op for wandb)."""
+        pass
+    
+    def finish(self):
+        """Finish wandb run."""
+        if self.run is not None:
+            try:
+                self.run.finish()
+            except Exception as e:
+                print(f"Failed to finish wandb run: {e}")
+    
+    def _should_log(self) -> bool:
+        """Check if should log to wandb."""
+        if not WANDB_AVAILABLE or not self.initialized or self.run is None:
+            return False
+            
+        try:
+            from src.utils.config import get_cfg
+            from src.utils import utils
+            cfg = get_cfg()
+            return cfg.WANDB.USE_WANDB and utils.get_rank() == 0
+        except:
+            return False
+    
+    def _prepare_config(self, additional_config: Optional[Dict] = None) -> Dict:
+        """Prepare configuration dictionary for wandb."""
+        from src.utils.config import get_cfg
+        cfg = get_cfg()
+        
+        # Convert CfgNode to dict
+        config_dict = {}
+        
+        # Add main config sections
+        config_dict.update({
+            "model": dict(cfg.MODEL),
+            "data": dict(cfg.DATA),
+            "training": dict(cfg.TRAINING),
+            "optimization": dict(cfg.OPTIMIZATION),
+            "augmentation": dict(cfg.AUGMENTATION),
+            "system": dict(cfg.SYSTEM),
+            "gaze": dict(cfg.GAZE) if hasattr(cfg, 'GAZE') else {},
+            "pretraining": dict(cfg.PRETRAINING) if hasattr(cfg, 'PRETRAINING') else {}
+        })
+        
+        # Add additional config if provided
+        if additional_config:
+            config_dict.update(additional_config)
+            
+        return config_dict
+    
+    def _generate_run_name(self) -> str:
+        """Generate a run name based on configuration."""
+        from src.utils.config import get_cfg
+        cfg = get_cfg()
+        
+        components = []
+        
+        # Add model info
+        if cfg.MODEL.NAME:
+            components.append(cfg.MODEL.NAME.split('_')[0])  # e.g., 'vit' from 'vit_base_patch16_224'
+            
+        # Add task info
+        if cfg.DATA.TASK:
+            components.append(cfg.DATA.TASK)
+            
+        # Add dataset info
+        if cfg.DATA.DATASET_NAME:
+            dataset_name = cfg.DATA.DATASET_NAME.lower().replace('-', '').replace('_', '')
+            components.append(dataset_name[:10])  # Truncate long names
+            
+        # Add key hyperparameters
+        if cfg.OPTIMIZATION.LR:
+            components.append(f"lr{cfg.OPTIMIZATION.LR}")
+            
+        if cfg.DATA.BATCH_SIZE:
+            components.append(f"bs{cfg.DATA.BATCH_SIZE}")
+            
+        return "-".join(components)
+
+
+class CombinedLogger(object):
+    """
+    Combined logger that can log to TensorBoard, Wandb, or both based on configuration.
+    Provides the same interface as TensorboardLogger for easy replacement.
+    """
+    
+    def __init__(self, log_dir: Optional[str] = None, config_dict: Optional[Dict] = None, resume_id: Optional[str] = None):
+        # Import config here to avoid circular imports
+        from src.utils.config import get_cfg
+        from src.utils import utils
+        
+        self.cfg = get_cfg()
+        self.step = 0
+        
+        # Initialize TensorBoard logger if log_dir is provided
+        self.tb_logger = None
+        if log_dir is not None:
+            try:
+                self.tb_logger = TensorboardLogger(log_dir)
+                print(f"TensorBoard logger initialized with log_dir: {log_dir}")
+            except Exception as e:
+                print(f"Failed to initialize TensorBoard logger: {e}")
+        
+        # Initialize Wandb logger if enabled
+        self.wandb_logger = None
+        if self.cfg.WANDB.USE_WANDB:
+            try:
+                self.wandb_logger = WandbLogger()
+                self.wandb_logger.init_wandb(config_dict, resume_id)
+            except Exception as e:
+                print(f"Failed to initialize Wandb logger: {e}")
+    
+    def watch_model(self, model: torch.nn.Module):
+        """Watch model with wandb."""
+        if self.wandb_logger is not None:
+            self.wandb_logger.watch_model(model)
+    
+    def log_model_info(self, model: torch.nn.Module, input_shape: tuple):
+        """Log model architecture information."""
+        if self.wandb_logger is not None:
+            self.wandb_logger.log_model_architecture(model, input_shape)
+    
+    def log_confusion_matrix(self, y_true: List, y_pred: List, class_names: Optional[List[str]] = None,
+                           step: Optional[int] = None, prefix: str = "val"):
+        """Log confusion matrix to wandb."""
+        if self.wandb_logger is not None:
+            self.wandb_logger.log_confusion_matrix(y_true, y_pred, class_names, step, prefix)
+    
+    def log_checkpoint(self, checkpoint_path: str, is_best: bool = False):
+        """Log checkpoint to wandb."""
+        if self.wandb_logger is not None:
+            self.wandb_logger.log_checkpoint(checkpoint_path, is_best)
+    
+    def set_step(self, step: Optional[int] = None):
+        """Set step for both loggers."""
+        if step is not None:
+            self.step = step
+        else:
+            self.step += 1
+            
+        if self.tb_logger is not None:
+            self.tb_logger.set_step(step)
+        if self.wandb_logger is not None:
+            self.wandb_logger.set_step(step)
+    
+    def update(self, head: str = 'scalar', step: Optional[int] = None, **kwargs):
+        """Update both loggers with metrics."""
+        # Log to TensorBoard
+        if self.tb_logger is not None:
+            self.tb_logger.update(head=head, step=step, **kwargs)
+        
+        # Log to Wandb
+        if self.wandb_logger is not None:
+            self.wandb_logger.update(head=head, step=step, **kwargs)
+    
+    def flush(self):
+        """Flush both loggers."""
+        if self.tb_logger is not None:
+            self.tb_logger.flush()
+        if self.wandb_logger is not None:
+            self.wandb_logger.flush()
+    
+    def finish(self):
+        """Finish logging."""
+        if self.wandb_logger is not None:
+            self.wandb_logger.finish()
+
+
+def create_logger(log_dir: Optional[str] = None, config_dict: Optional[Dict] = None, 
+                 resume_id: Optional[str] = None) -> CombinedLogger:
+    """
+    Create a combined logger that supports both TensorBoard and Wandb.
+    
+    Args:
+        log_dir: Directory for TensorBoard logs (if None, TensorBoard logging is disabled)
+        config_dict: Additional configuration to log to wandb
+        resume_id: Resume run ID for wandb
+    
+    Returns:
+        CombinedLogger instance
+    """
+    return CombinedLogger(log_dir=log_dir, config_dict=config_dict, resume_id=resume_id)
+
+
+def log_system_info(logger: Optional[CombinedLogger] = None):
+    """Log system information to wandb."""
+    try:
+        from src.utils.config import get_cfg
+        from src.utils import utils
+        
+        cfg = get_cfg()
+        if not cfg.WANDB.USE_WANDB or utils.get_rank() != 0:
+            return
+            
+        if logger is None or logger.wandb_logger is None:
+            return
+            
+        import psutil
+        
+        system_info = {
+            "system/cpu_count": psutil.cpu_count(),
+            "system/memory_gb": psutil.virtual_memory().total / (1024**3),
+        }
+        
+        # GPU info
+        if torch.cuda.is_available():
+            system_info.update({
+                "system/gpu_count": torch.cuda.device_count(),
+                "system/gpu_memory_gb": torch.cuda.get_device_properties(0).total_memory / (1024**3),
+                "system/cuda_version": torch.version.cuda
+            })
+        
+        if WANDB_AVAILABLE and logger.wandb_logger.run is not None:
+            logger.wandb_logger.run.log(system_info)
+        
+    except Exception as e:
+        print(f"Failed to log system info: {e}")
         
         
 

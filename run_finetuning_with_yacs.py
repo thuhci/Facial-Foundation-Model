@@ -36,7 +36,7 @@ from src.optim.mixup import Mixup
 from src.dataset.datasets import build_dataset
 from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
 from src.utils.utils import multiple_samples_collate
-from src.utils.logger import TensorboardLogger
+from src.utils.logger import create_logger, log_system_info
 from src.utils import utils
 
 from src.models import ViT, ViT_pretrain, layers
@@ -81,6 +81,7 @@ def create_data_loaders():
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     
     if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+        print("DEBUG: Using data augmentation with multiple samples")
         collate_func = partial(multiple_samples_collate, fold=False)
     else:
         collate_func = None
@@ -518,9 +519,32 @@ def main(args):
     )
     
     # Create log writer
-    log_writer = TensorboardLogger(
-        log_dir=cfg.SYSTEM.OUTPUT_DIR,
+    log_dir = None
+    if cfg.SYSTEM.LOG_DIR is not None:
+        log_dir = cfg.SYSTEM.LOG_DIR
+        os.makedirs(log_dir, exist_ok=True)
+    elif cfg.SYSTEM.OUTPUT_DIR:
+        log_dir = os.path.join(cfg.SYSTEM.OUTPUT_DIR, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+    
+    log_writer = create_logger(
+        log_dir=log_dir,
+        config_dict={
+            'script_type': 'finetuning',
+            'num_parameters': n_parameters,
+            'total_batch_size': total_batch_size,
+            'num_training_steps_per_epoch': num_training_steps_per_epoch,
+            'num_classes': cfg.DATA.NUM_CLASSES
+        }
     )
+    
+    # Log system information
+    log_system_info(log_writer)
+    
+    # Log model architecture
+    if utils.get_rank() == 0:
+        log_writer.log_model_info(model, (cfg.DATA.BATCH_SIZE, 3, cfg.DATA.NUM_FRAMES, cfg.MODEL.INPUT_SIZE, cfg.MODEL.INPUT_SIZE))
+        log_writer.watch_model(model)
     
     # Create training engine
     training_engine = TrainingEngine(
@@ -613,6 +637,22 @@ def main(args):
             'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
         }
         
+        # Log validation metrics to wandb/tensorboard
+        if log_writer is not None:
+            # Set epoch step for logging
+            log_writer.set_step(epoch)
+            
+            # Log validation metrics with 'val' prefix
+            log_writer.update(head='val', step=epoch, **test_stats)
+            
+            # Log training metrics with 'train' prefix  
+            log_writer.update(head='train', step=epoch, **train_stats)
+            
+            # Log other epoch info
+            log_writer.update(head='epoch', step=epoch, 
+                            epoch=epoch, 
+                            n_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
+        
         if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
@@ -676,6 +716,18 @@ def main(args):
         print(f"Micro F1: {final_results['final_micro_f1']:.4f}")
         print(f"Macro F1: {final_results['final_macro_f1']:.4f}")
         
+        # Log final results to wandb/tensorboard
+        if log_writer is not None:
+            log_writer.update(head='final', **final_results)
+            
+            # Log confusion matrix if available in detailed stats
+            if 'predictions' in detailed_stats and 'targets' in detailed_stats:
+                log_writer.log_confusion_matrix(
+                    y_true=detailed_stats['targets'],
+                    y_pred=detailed_stats['predictions'],
+                    step=epoch
+                )
+        
         # Save to log file
         if cfg.SYSTEM.OUTPUT_DIR:
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "final_results.json"), "w") as f:
@@ -684,6 +736,10 @@ def main(args):
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write("=== FINAL RESULTS ===\n")
                 f.write(json.dumps(final_results, indent=2) + "\n")
+    
+    # Finish wandb logging
+    if log_writer is not None:
+        log_writer.finish()
     
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
