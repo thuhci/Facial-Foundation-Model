@@ -11,6 +11,8 @@ model:
   use_mean_pooling: True
   # depth: 16
 
+  keep_temporal_dim: True  # Keep temporal dimension for gaze estimation
+
   use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
   
   # Attention configuration
@@ -36,8 +38,8 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 16
-  num_workers: 4
+  batch_size: 32
+  num_workers: 20
   pin_memory: true
 
 augmentation:
@@ -137,3 +139,6 @@ system:
   
   # Features
   save_feature: false
+
+# wandb:
+#   use_wandb: true
