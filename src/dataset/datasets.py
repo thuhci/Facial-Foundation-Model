@@ -394,16 +394,16 @@ def build_dataset(is_train, test_mode):
         anno_path = None
         if is_train is True:
             mode = 'train'
-            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'train.csv')
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'train')
         elif test_mode is True:
             mode = 'test'
-            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test')
         else:
             mode = 'validation'
-            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val.csv')
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val')
 
-        from src.dataset.kinetics import VideoRegDatasetGaze360
-        dataset = VideoRegDatasetGaze360(
+        from src.dataset.kinetics import VideoRegDatasetFrame
+        dataset = VideoRegDatasetFrame(
             anno_path=anno_path,
             data_path='/',
             mode=mode,
@@ -417,9 +417,11 @@ def build_dataset(is_train, test_mode):
             crop_size=cfg.MODEL.INPUT_SIZE,
             short_side_size=cfg.DATA.SHORT_SIDE_SIZE,
             file_ext='jpg',
-            predict_last_frame=True,  # Predict the gaze of the last frame
         )
         nb_classes = 2
+        
+        
+        
     elif cfg.DATA.DATASET_NAME == 'EVE':
         mode = None
         anno_path = None
