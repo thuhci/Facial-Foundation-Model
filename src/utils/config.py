@@ -38,7 +38,7 @@ _C.MODEL.MASK_TYPE = 'tube'
 _C.MODEL.WINDOW_SIZE = [8, 14, 14]
 _C.MODEL.MASK_RATIO = 0.75
 _C.MODEL.PART_WIN_SIZE = [8, 7, 7]
-_C.MODEL.PART_APPLY_SYMMETRY = True
+_C.MODEL.PART_APPLY_SYMMETRY = None  # 'global', 'local', or None
 
 # Attention configuration
 _C.MODEL.ATTN_TYPE = 'local_global'
@@ -84,7 +84,7 @@ _C.DATA.SHORT_SIDE_SIZE = 320
 _C.AUGMENTATION = CN()
 _C.AUGMENTATION.COLOR_JITTER = 0.4
 _C.AUGMENTATION.TRAIN_INTERPOLATION = 'bicubic'
-_C.AUGMENTATION.NUM_SAMPLE = 2
+_C.AUGMENTATION.NUM_SAMPLE = 1
 _C.AUGMENTATION.AUTO_AUGMENT = 'rand-m7-n4-mstd0.5-inc1'
 _C.AUGMENTATION.MIXUP = 0.8
 _C.AUGMENTATION.CUTMIX = 1.0
@@ -158,6 +158,20 @@ _C.SYSTEM.GPU = -1  # Default GPU, will be set in init_distributed_mode
 # _C.SYSTEM.RANK = 0  # Default rank, will be set in init_distributed_mode
 _C.SYSTEM.DISTRIBUTED = False  # Default distributed mode, will be set in init_distributed_mode
 _C.SYSTEM.DIST_BACKEND = 'nccl'  # Default backend for distributed training
+
+# Wandb configuration
+_C.WANDB = CN()
+_C.WANDB.USE_WANDB = False
+_C.WANDB.PROJECT = 'facial-foundation-model'
+_C.WANDB.ENTITY = None  # Your wandb username or team name
+_C.WANDB.RUN_NAME = None  # If None, will auto-generate based on config
+_C.WANDB.TAGS = []  # List of tags for the run
+_C.WANDB.NOTES = ""  # Notes for the run
+_C.WANDB.MODE = 'online'  # 'online', 'offline', 'disabled'
+_C.WANDB.SAVE_CODE = True  # Save code to wandb
+_C.WANDB.LOG_FREQ = 50  # Log frequency (every N steps)
+_C.WANDB.WATCH_MODEL = True  # Whether to watch model gradients
+_C.WANDB.WATCH_LOG = 'all'  # 'gradients', 'parameters', 'all', or None
 
 
 def get_cfg_defaults():

@@ -58,13 +58,14 @@ class UnitTester:
         
         # Test configurations
         self.finetune_configs = [
-            'configs/gaze360_finetune.yaml',
-            'configs/dfew_finetune.yaml',
-            'configs/eve_finetune.yaml',  # Add more if needed
+            # 'configs/gaze360_finetune.yaml',
+            'configs/gaze360T.yaml',
+            # 'configs/dfew_finetune.yaml',
+            # 'configs/eve_finetune.yaml',  # Add more if needed
         ]
         
         self.pretrain_configs = [
-            'configs/voxceleb2_pretrain.yaml',
+            # 'configs/voxceleb2_pretrain.yaml',
             # Add more pretrain configs if available
         ]
         

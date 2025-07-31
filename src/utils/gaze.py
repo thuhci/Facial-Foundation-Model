@@ -5,8 +5,8 @@ from src.utils.config import get_cfg
 
 def spherical_to_cartesian(spherical_coords):
     """将球坐标转换为笛卡尔坐标"""
-    pitch = spherical_coords[:, 0]  # 俯仰角
-    yaw = spherical_coords[:, 1]    # 偏航角
+    pitch = spherical_coords[..., 0]  # 俯仰角
+    yaw = spherical_coords[..., 1]    # 偏航角
     
     # 转换为笛卡尔坐标
     x = torch.cos(pitch) * torch.sin(yaw)
@@ -17,9 +17,9 @@ def spherical_to_cartesian(spherical_coords):
 
 def cartesian_to_spherical(cartesian_coords):
     """将笛卡尔坐标转换为球坐标"""
-    x = cartesian_coords[:, 0]
-    y = cartesian_coords[:, 1]
-    z = cartesian_coords[:, 2]
+    x = cartesian_coords[..., 0]
+    y = cartesian_coords[..., 1]
+    z = cartesian_coords[..., 2]
     
     # 计算俯仰角和偏航角
     pitch = torch.asin(torch.clamp(y, -1.0, 1.0))
@@ -43,9 +43,9 @@ def compute_angular_error(pred_spherical, target_spherical):
 
 def gaze3d_to_gaze2d(gaze_3d):
     """将3D gaze向量转换为2D角度（pitch, yaw）就是cartesian_to_spherical"""
-    x = gaze_3d[:, 0]
-    y = gaze_3d[:, 1]
-    z = gaze_3d[:, 2]
+    x = gaze_3d[..., 0]
+    y = gaze_3d[..., 1]
+    z = gaze_3d[..., 2]
     
     pitch = torch.asin(torch.clamp(y, -1.0, 1.0))
     yaw = torch.atan2(x, -z)
@@ -112,8 +112,8 @@ def l2cs_criterion(outputs, targets):
     cfg = get_cfg()
             # 假设 targets 是 3D gaze 向量
     gaze_2d = gaze3d_to_gaze2d(targets)
-    pitch_target = gaze_2d[:, 0]
-    yaw_target = gaze_2d[:, 1]
+    pitch_target = gaze_2d[..., 0]
+    yaw_target = gaze_2d[..., 1]
     
     # 转换为分类标签
     pitch_bins = angles_to_bins(pitch_target, cfg.GAZE.NUM_BINS, cfg.GAZE.BIN_WIDTH)
