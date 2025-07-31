@@ -11,6 +11,7 @@ from src.utils.config import get_cfg
 from src.optim.mixup import Mixup
 from timm.utils import ModelEma, accuracy
 from src import utils
+import os
 
 
 
@@ -22,6 +23,34 @@ class ValidationEngine:
     def __init__(self, model: nn.Module, device: torch.device):
         self.model = model
         self.device = device
+        
+    
+    @torch.no_grad()
+    def _process_batch(self, batch_data: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Process batch data and apply mixup if needed."""
+        samples, targets, _ = batch_data
+        samples = samples.to(self.device, non_blocking=True)
+        targets = targets.to(self.device, non_blocking=True)
+        
+        cfg = get_cfg()
+        # print(f"[DEBUG] samples shape: {samples.shape}, targets shape: {targets.shape}")
+        # print(f"[DEBUG] cfg.MODEL.KEEP_TEMPORAL_DIM: {cfg.MODEL.KEEP_TEMPORAL_DIM}")
+        if cfg.MODEL.KEEP_TEMPORAL_DIM:
+            if targets.dim() == 3:
+                pass
+            elif targets.dim() == 2:
+                raise ValueError("KEEP_TEMPORAL_DIM requires 5D dataset")
+        elif targets.dim() == 3:
+            # print("[DEBUG] targets shape before squeeze:", targets.shape)
+            targets = targets[:,-1,:]
+        
+        # Ensure correct data types
+        if cfg.DATA.TASK == 'regression':
+            targets = targets.float()  # Regression task
+        else:
+            targets = targets.long()   # Classification task
+            
+        return samples, targets
     
     @torch.no_grad()
     def validate(self, data_loader: DataLoader) -> Dict[str, float]:
@@ -45,8 +74,10 @@ class ValidationEngine:
         
         for batch in metric_logger.log_every(data_loader, 10, header):
             videos, targets = batch[0], batch[1]
-            videos = videos.to(self.device, non_blocking=True)
-            targets = targets.to(self.device, non_blocking=True)
+            # videos = videos.to(self.device, non_blocking=True)
+            # targets = targets.to(self.device, non_blocking=True)
+            
+            videos, targets = self._process_batch(batch)
             
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
@@ -64,12 +95,16 @@ class ValidationEngine:
                     #     acc5 = torch.tensor(0.0)  # Placeholder
                     # else:
                     #     # Standard gaze regression
-                    if targets.dim() == 2 and targets.size(1) == 3:
+                    if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
+                        target_angles = targets.reshape(-1, 3)  # Ensure correct shape
                         target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                        target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
                     else:
                         target_angles = targets
+                    output = output.reshape(-1, 2)  # Ensure outputs are also 2D angles
                     # target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                    print("[DEBUG] target_angles shape:", target_angles.shape, "output shape:", output.shape)
                     loss = criterion(output, target_angles)
                     angular_error = utils.gaze.compute_angular_error(output, target_angles)
                     acc1 = torch.tensor(0.0)  # Placeholder

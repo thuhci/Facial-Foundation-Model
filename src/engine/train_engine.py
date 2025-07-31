@@ -129,6 +129,18 @@ class TrainingEngine:
         samples = samples.to(self.device, non_blocking=True)
         targets = targets.to(self.device, non_blocking=True)
         
+        cfg = self.cfg
+        # print(f"[DEBUG] samples shape: {samples.shape}, targets shape: {targets.shape}")
+        # print(f"[DEBUG] cfg.MODEL.KEEP_TEMPORAL_DIM: {cfg.MODEL.KEEP_TEMPORAL_DIM}")
+        if cfg.MODEL.KEEP_TEMPORAL_DIM:
+            if targets.dim() == 3:
+                pass
+            elif targets.dim() == 2:
+                raise ValueError("KEEP_TEMPORAL_DIM requires 5D dataset")
+        elif targets.dim() == 3:
+            # print("[DEBUG] targets shape before squeeze:", targets.shape)
+            targets = targets[:,-1,:]
+        
         # Ensure correct data types
         if self.cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
@@ -156,26 +168,25 @@ class TrainingEngine:
         """Task-specific forward pass."""
         outputs = self.model(samples)
         
-        if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
-            raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
+        # if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
+        #     raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
         
         if self.cfg.DATA.TASK == 'regression':
-            if self.cfg.DATA.DATASET_NAME == 'Gaze360':
-                if self.cfg.GAZE.USE_L2CS:
-                    # L2CS mode
-                    if isinstance(outputs, dict):
-                        total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
-                        return total_loss, outputs
-                    else:
-                        raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
+            if self.cfg.DATA.DATASET_NAME == 'Gaze360' and self.cfg.GAZE.USE_L2CS:
+                if isinstance(outputs, dict):
+                    total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
+                    return total_loss, outputs
                 else:
-                    # Standard gaze regression
-                    target_angles = gaze3d_to_gaze2d(targets)
-                    loss = self.criterion(outputs, target_angles)
-                    return loss, outputs
+                    raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
             else:
-                # Standard regression task
-                loss = self.criterion(outputs, targets)
+                # Standard gaze regression
+                if targets.shape[-1] == 3:
+                    target_angles = targets.reshape(-1, 3)  # Ensure correct shape
+                    target_angles = gaze3d_to_gaze2d(targets)
+                    target_angles = target_angles.reshape(-1, 2)
+                target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
+                outputs = outputs.reshape(-1, 2)  # Ensure outputs are also 2D angles
+                loss = self.criterion(outputs, target_angles)
                 return loss, outputs
         else:
             # Classification task
@@ -244,9 +255,11 @@ class TrainingEngine:
                 #     class_acc = 0.0  # Placeholder
                 # else:
                     # Standard regression mode
-                if targets.dim() == 2 and targets.size(1) == 3:
+                if targets.shape[-1] == 3:
                     # 3D gaze vector
+                    target_angles = targets.reshape(-1, 3)
                     target_angles = gaze3d_to_gaze2d(targets)
+                    target_angles = target_angles.reshape(-1, 2)
                 else:
                     target_angles = targets
                 angular_error = compute_angular_error(output, target_angles)
@@ -293,9 +306,11 @@ class TrainingEngine:
         if self.mixup_fn is None:
             if self.cfg.DATA.TASK == 'regression':
                 if not self.cfg.GAZE.USE_L2CS:
-                    if targets.dim() == 2 and targets.size(1) == 3:
+                    if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
+                        targets = targets.reshape(-1, 3)  # Ensure correct shape
                         target_angles = gaze3d_to_gaze2d(targets)
+                        targets = target_angles.reshape(-1, 2)  # Reshape to 2D angles
                     else:
                         target_angles = targets
                     angular_error = compute_angular_error(output, target_angles)
