@@ -98,15 +98,18 @@ class ValidationEngine:
                     if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
                         target_angles = targets.reshape(-1, 3)  # Ensure correct shape
-                        target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                        target_angles = utils.gaze.gaze3d_to_gaze2d(target_angles)
                         target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
                     else:
                         target_angles = targets
                     output = output.reshape(-1, 2)  # Ensure outputs are also 2D angles
                     # target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
-                    print("[DEBUG] target_angles shape:", target_angles.shape, "output shape:", output.shape)
+                    # print("[DEBUG] target_angles shape:", target_angles.shape, "output shape:", output.shape)
+                    # print("[DEBUG] target_angles:", target_angles, "output:", output)
                     loss = criterion(output, target_angles)
+                    # print("[DEBUG] loss:", loss.item())
                     angular_error = utils.gaze.compute_angular_error(output, target_angles)
+                    # print("[DEBUG] angular_error:", angular_error.item())
                     acc1 = torch.tensor(0.0)  # Placeholder
                     acc5 = torch.tensor(0.0)  # Placeholder
                 else:

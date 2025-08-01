@@ -182,7 +182,7 @@ class TrainingEngine:
                 # Standard gaze regression
                 if targets.shape[-1] == 3:
                     target_angles = targets.reshape(-1, 3)  # Ensure correct shape
-                    target_angles = gaze3d_to_gaze2d(targets)
+                    target_angles = gaze3d_to_gaze2d(target_angles)
                     target_angles = target_angles.reshape(-1, 2)
                 target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
                 outputs = outputs.reshape(-1, 2)  # Ensure outputs are also 2D angles
@@ -258,7 +258,7 @@ class TrainingEngine:
                 if targets.shape[-1] == 3:
                     # 3D gaze vector
                     target_angles = targets.reshape(-1, 3)
-                    target_angles = gaze3d_to_gaze2d(targets)
+                    target_angles = gaze3d_to_gaze2d(target_angles)
                     target_angles = target_angles.reshape(-1, 2)
                 else:
                     target_angles = targets
@@ -308,9 +308,9 @@ class TrainingEngine:
                 if not self.cfg.GAZE.USE_L2CS:
                     if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
-                        targets = targets.reshape(-1, 3)  # Ensure correct shape
-                        target_angles = gaze3d_to_gaze2d(targets)
-                        targets = target_angles.reshape(-1, 2)  # Reshape to 2D angles
+                        target_angles = targets.reshape(-1, 3)  # Ensure correct shape
+                        target_angles = gaze3d_to_gaze2d(target_angles)
+                        target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
                     else:
                         target_angles = targets
                     angular_error = compute_angular_error(output, target_angles)

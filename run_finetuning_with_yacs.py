@@ -653,9 +653,12 @@ def main(args):
                             epoch=epoch, 
                             n_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
         
-        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
-            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        try:
+            if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
+                with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                    f.write(json.dumps(log_stats) + "\n")
+        except Exception as e:
+            print(f"Error saving log stats: {e}")
         
         # Track best accuracy and save best model
         if cfg.DATA.TASK == 'regression':
