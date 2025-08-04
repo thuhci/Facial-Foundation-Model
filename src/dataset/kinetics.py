@@ -1010,8 +1010,12 @@ class VideoReaderEVE:
             # Convert to PIL images
             pil_frames = [Image.fromarray(frame) for frame in frames]
             
+            cfg = get_cfg()
             # Load corresponding labels
-            labels = self.load_h5_labels([end_frame_idx])  # Only get label for last frame
+            if not cfg.MODEL.KEEP_TEMPORAL_DIM:
+                labels = self.load_h5_labels([end_frame_idx])  # Only get label for last frame
+            else:
+                labels = self.load_h5_labels(frame_indices)
             
             return pil_frames, labels
             
@@ -1108,13 +1112,24 @@ class VideoRegDatasetEVE(VideoClsDatasetFrame):
             if labels and len(labels) > 0:
                 # Example: use combined gaze direction as target
                 # You may need to adjust this based on your specific needs
-                if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
-                    left_gaze = labels['left_g_tobii'][-1]  # Last frame
-                    right_gaze = labels['right_g_tobii'][-1]
-                    # Average left and right gaze
-                    target_label = (left_gaze + right_gaze) / 2.0
-                elif 'PoG_px_tobii' in labels:
-                    target_label = labels['PoG_px_tobii'][-1]  # Last frame PoG
+                cfg = get_cfg()
+                if cfg.MODEL.KEEP_TEMPORAL_DIM:
+                    # Use all frames' labels
+                    if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
+                        left_gaze = labels['left_g_tobii']
+                        right_gaze = labels['right_g_tobii']
+                        # Average left and right gaze
+                        target_label = (left_gaze + right_gaze) / 2.0
+                    elif 'PoG_px_tobii' in labels:
+                        target_label = labels['PoG_px_tobii']
+                else:
+                    if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
+                        left_gaze = labels['left_g_tobii'][-1]  # Last frame
+                        right_gaze = labels['right_g_tobii'][-1]
+                        # Average left and right gaze
+                        target_label = (left_gaze + right_gaze) / 2.0
+                    elif 'PoG_px_tobii' in labels:
+                        target_label = labels['PoG_px_tobii'][-1]  # Last frame PoG
                     
             return frames, target_label
             

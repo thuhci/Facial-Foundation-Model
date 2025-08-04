@@ -577,6 +577,7 @@ def main(args):
         #         loss_scaler.load_state_dict(checkpoint['scaler'])
         # else:
         #     start_epoch = 0
+        start_epoch = cfg.TRAINING.START_EPOCH
     else:
         start_epoch = 0
     

@@ -97,18 +97,18 @@ class ValidationEngine:
                     #     # Standard gaze regression
                     if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
-                        target_angles = targets.reshape(-1, 3)  # Ensure correct shape
-                        target_angles = utils.gaze.gaze3d_to_gaze2d(target_angles)
-                        target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
+                        targets = targets.reshape(-1, 3)  # Ensure correct shape
+                        targets = utils.gaze.gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                     else:
-                        target_angles = targets
+                        targets = targets.reshape(-1, 2)  # Ensure correct shape
                     output = output.reshape(-1, 2)  # Ensure outputs are also 2D angles
-                    # target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
-                    # print("[DEBUG] target_angles shape:", target_angles.shape, "output shape:", output.shape)
-                    # print("[DEBUG] target_angles:", target_angles, "output:", output)
-                    loss = criterion(output, target_angles)
+                    # targets = utils.gaze.gaze3d_to_gaze2d(targets)
+                    # print("[DEBUG] targets shape:", targets.shape, "output shape:", output.shape)
+                    # print("[DEBUG] targets:", targets, "output:", output)
+                    loss = criterion(output, targets)
                     # print("[DEBUG] loss:", loss.item())
-                    angular_error = utils.gaze.compute_angular_error(output, target_angles)
+                    angular_error = utils.gaze.compute_angular_error(output, targets)
                     # print("[DEBUG] angular_error:", angular_error.item())
                     acc1 = torch.tensor(0.0)  # Placeholder
                     acc5 = torch.tensor(0.0)  # Placeholder

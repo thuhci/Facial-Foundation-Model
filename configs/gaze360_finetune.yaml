@@ -36,8 +36,8 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 16
-  num_workers: 4
+  batch_size: 32
+  num_workers: 20
   pin_memory: true
 
 augmentation:

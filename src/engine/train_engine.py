@@ -81,6 +81,7 @@ class TrainingEngine:
             
             # Forward pass
             loss, output = self._forward_pass(samples, targets)
+            # print(f"[DEBUG] Loss: {loss.item()}, Output shape: {output.shape}, Targets shape: {targets.shape}")
             
             # Check for invalid loss
             if not math.isfinite(loss.item()):
@@ -181,12 +182,12 @@ class TrainingEngine:
             else:
                 # Standard gaze regression
                 if targets.shape[-1] == 3:
-                    target_angles = targets.reshape(-1, 3)  # Ensure correct shape
-                    target_angles = gaze3d_to_gaze2d(target_angles)
-                    target_angles = target_angles.reshape(-1, 2)
-                target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
+                    targets = targets.reshape(-1, 3)  # Ensure correct shape
+                    targets = gaze3d_to_gaze2d(targets)
+                    targets = targets.reshape(-1, 2)
+                targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                 outputs = outputs.reshape(-1, 2)  # Ensure outputs are also 2D angles
-                loss = self.criterion(outputs, target_angles)
+                loss = self.criterion(outputs, targets)
                 return loss, outputs
         else:
             # Classification task
@@ -257,12 +258,13 @@ class TrainingEngine:
                     # Standard regression mode
                 if targets.shape[-1] == 3:
                     # 3D gaze vector
-                    target_angles = targets.reshape(-1, 3)
-                    target_angles = gaze3d_to_gaze2d(target_angles)
-                    target_angles = target_angles.reshape(-1, 2)
+                    targets = targets.reshape(-1, 3)
+                    targets = gaze3d_to_gaze2d(targets)
+                    targets = targets.reshape(-1, 2)
                 else:
-                    target_angles = targets
-                angular_error = compute_angular_error(output, target_angles)
+                    targets = targets.reshape(-1, 2)  # Ensure correct shape
+                # print(f"[DEBUG] targets shape after processing: {targets.shape}, shape of output: {output.shape}")
+                angular_error = compute_angular_error(output, targets)
                 class_acc = angular_error
                 metric_logger.update(angular_error=angular_error)
             else:
@@ -308,12 +310,12 @@ class TrainingEngine:
                 if not self.cfg.GAZE.USE_L2CS:
                     if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
-                        target_angles = targets.reshape(-1, 3)  # Ensure correct shape
-                        target_angles = gaze3d_to_gaze2d(target_angles)
-                        target_angles = target_angles.reshape(-1, 2)  # Reshape to 2D angles
+                        targets = targets.reshape(-1, 3)  # Ensure correct shape
+                        targets = gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                     else:
-                        target_angles = targets
-                    angular_error = compute_angular_error(output, target_angles)
+                        targets = targets.reshape(-1, 2)  # Ensure correct shape
+                    angular_error = compute_angular_error(output, targets)
                     self.log_writer.update(angular_error=angular_error, head="loss")
                 class_acc = 0.0  # Placeholder for gaze
             else:
