@@ -39,6 +39,20 @@ dependencies:
 * `opencv-python=4.7.0.72`
 * `tensorboardX=2.6.1`
 
+### Mamba installation:
+- Clone the VideoMamba repo:
+  ```shell
+  git clone https://github.com/OpenGVLab/VideoMamba.git
+  ```
+- Install its dependencies:
+  ```shell
+  cd VideoMamba
+  pip install -r requirements.txt
+  pip install -e causal-conv1d
+  pip install -e mamba
+  ```
+
+
 
 ### ➡️ Data Preparation
 

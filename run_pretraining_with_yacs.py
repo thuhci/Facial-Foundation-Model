@@ -25,7 +25,7 @@ from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
 from src.utils.config import get_cfg, merge_config_file, freeze_cfg, load_and_freeze_config
 from src.utils.logger import create_logger, log_system_info
 from src import utils
-from src.models import ViT_pretrain, ViT, layers
+from src.models import ViT_pretrain, ViT, layers, ViM_pretrain
 
 
 def get_args_parser():
@@ -80,7 +80,12 @@ def create_model_from_config():
     
     # Handle model name variations
     model_name = cfg.MODEL.NAME
-    if 'no_depth' in model_name and cfg.MODEL.ENCODER_DEPTH is not None:
+    if "mamba" in model_name:
+        model = create_model(
+            model_name,
+            pretrained=False,
+        )
+    elif 'no_depth' in model_name and cfg.MODEL.ENCODER_DEPTH is not None:
         model = create_model(
             model_name,
             pretrained=False,
@@ -117,14 +122,15 @@ def create_model_from_config():
     model = model.float()
     
     # Get patch size and set window size
-    patch_size = model.encoder.patch_embed.patch_size
-    print("Patch size = %s" % str(patch_size))
+    # patch_size = model.encoder.patch_embed.patch_size
+    # print("Patch size = %s" % str(patch_size))
+
+    patch_size = (cfg.MODEL.PATCH_SIZE[0], cfg.MODEL.PATCH_SIZE[1])
     
     # Update config with computed values
     cfg.MODEL.WINDOW_SIZE = (cfg.DATA.NUM_FRAMES // cfg.MODEL.TUBELET_SIZE,
                             cfg.MODEL.INPUT_SIZE // patch_size[0],
                             cfg.MODEL.INPUT_SIZE // patch_size[1])
-    cfg.MODEL.PATCH_SIZE = patch_size
     
     return model
 

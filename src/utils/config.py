@@ -29,6 +29,7 @@ _C.MODEL.INIT_SCALE = 0.001
 _C.MODEL.WITH_CP = False
 _C.MODEL.COS_ATTN = False
 _C.MODEL.KEEP_TEMPORAL_DIM = False  # Whether to keep temporal dimension in output
+_C.MODEL.PATCH_SIZE = [16, 16]
 
 # patch embedding configuration
 _C.MODEL.USE_ENHANCED_PATCH_EMBED = False  # Use enhanced patch embedding for better performance
