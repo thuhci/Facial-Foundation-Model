@@ -2,8 +2,8 @@ import os
 import argparse
 import pandas as pd
 
-data_root = '/root/shared/Gaze360/normalized_imgs'
-output_root = 'saved/data/gaze360T'
+data_root = '/root/shared/Gaze360'
+output_root = 'saved/data/gaze360T_phi'
 
 
     
@@ -19,7 +19,7 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         os.makedirs(output_root)
     for split in ["train", "val", "test"]:
     # for split in ["test"]:
-        txt_path = f"/root/shared/Gaze360/lbls/{split}.txt"
+        txt_path = f"/root/shared/Gaze360/phi_normalize/Label/{split}.label"
         out_path = f"{output_root}/{split}"
         if not os.path.exists(out_path):
             os.makedirs(out_path)
@@ -29,19 +29,22 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         with open(txt_path, 'r') as f:
             for line in f.readlines():
                 line = line.strip()
-                if not line:
+                if not line or line=='Face 2DGaze':
                     continue
+                # print(line)
                 # delete the '.jpg' suffix
                 # line = line.replace('.jpg', '')
                 # add "data_root" to the beginning
-                rec_name = line.split('/')[0]
-                vid_name = line.split('/')[2]
-                frame_name = line.split('/')[3].split('.')[0]
-                lbl = line.split('/')[3]
+                rec_name = line.split('/')[6]
+                vid_name = line.split('/')[8]
+                frame_name = line.split('/')[9].split('.')[0]
+                lbl = line.split('/')[9]
 
                 # print("rec_name", rec_name, "vid_name", vid_name, "frame_name", frame_name)
-
-                line = os.path.join(data_root, line)
+                
+                repl_line = line.replace('../Gaze360', '').replace(",", ' ')
+                line = data_root + repl_line
+                print("line: ", line)
                 
                 
                 
@@ -79,7 +82,7 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
             # if len(file) < len_threshold:
             #     continue
             # write to csv file
-            csv_path = f"saved/data/gaze360T/{split}/{split}_{file[0][1]}_{file[0][2]}_{i}.csv"
+            csv_path = f"saved/data/gaze360T_phi/{split}/{split}_{file[0][1]}_{file[0][2]}_{i}.csv"
             # first clear the  directory
             if os.path.exists(csv_path):
                 os.remove(csv_path)
@@ -89,13 +92,13 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
             df.to_csv(csv_path, header=None, index=False)
             
         for i, file in enumerate(discarded_files):
-            out_lines = [f"{line[0]}" for line in file]
+            out_lines = [line[0] for line in file]
             # if len(file) < len_threshold:
             #     continue
             # write to csv file
-            csv_path = f"saved/data/gaze360T/{split}_discarded/{split}_{file[0][1]}_{file[0][2]}_{i}.csv"
-            if not os.path.exists(f"saved/data/gaze360T/{split}_discarded"):
-                os.makedirs(f"saved/data/gaze360T/{split}_discarded")
+            csv_path = f"saved/data/gaze360T_phi/{split}_discarded/{split}_{file[0][1]}_{file[0][2]}_{i}.csv"
+            if not os.path.exists(f"saved/data/gaze360T_phi/{split}_discarded"):
+                os.makedirs(f"saved/data/gaze360T_phi/{split}_discarded")
             if os.path.exists(csv_path):
                 os.remove(csv_path)
             df = pd.DataFrame(out_lines, columns=['file_path'])
