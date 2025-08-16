@@ -25,8 +25,9 @@ try:
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
+from src.models.layers import get_sinusoid_encoding_table
 
-class Block(nn.Module):
+class BlockViM(nn.Module):
     def __init__(
         self, dim, mixer_cls, norm_cls=nn.LayerNorm, fused_add_norm=False, residual_in_fp32=False,drop_path=0.,
     ):
@@ -90,7 +91,7 @@ class Block(nn.Module):
         return self.mixer.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
 
 
-def create_block(
+def create_block_ViM(
     d_model,
     ssm_cfg=None,
     norm_epsilon=1e-5,
@@ -108,7 +109,7 @@ def create_block(
         ssm_cfg = {}
     mixer_cls = partial(Mamba, layer_idx=layer_idx, bimamba=bimamba, **ssm_cfg, **factory_kwargs)
     norm_cls = partial(nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon)
-    block = Block(
+    block = BlockViM(
         d_model,
         mixer_cls,
         norm_cls=norm_cls,
@@ -163,7 +164,7 @@ def segm_init_weights(m):
         nn.init.constant_(m.weight, 1.0)
 
 
-class PatchEmbed(nn.Module):
+class PatchEmbedViM(nn.Module):
     """ Image to Patch Embedding
     """
     def __init__(self, img_size=224, patch_size=16, kernel_size=1, in_chans=3, embed_dim=768):
@@ -221,21 +222,6 @@ class Linear_Decoder(nn.Module):
         return x
     
 
-# sin-cos position encoding
-# https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/Models.py#L31
-def get_sinusoid_encoding_table(n_position, d_hid): 
-    ''' Sinusoid position encoding table ''' 
-    # TODO: make it with torch instead of numpy 
-    def get_position_angle_vec(position): 
-        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)] 
-
-    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)]) 
-    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2]) # dim 2i 
-    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2]) # dim 2i+1 
-
-    return  torch.tensor(sinusoid_table, dtype=torch.float, requires_grad=False).unsqueeze(0) 
-
-
 class VisionMamba(nn.Module):
     def __init__(
             self, 
@@ -287,7 +273,7 @@ class VisionMamba(nn.Module):
         # pretrain parameters
         self.d_model = self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
 
-        self.patch_embed = PatchEmbed(
+        self.patch_embed = PatchEmbedViM(
             img_size=img_size, patch_size=patch_size, 
             kernel_size=kernel_size,
             in_chans=channels, embed_dim=embed_dim
@@ -304,7 +290,7 @@ class VisionMamba(nn.Module):
         # mamba blocks
         self.layers = nn.ModuleList(
             [
-                create_block(
+                create_block_ViM(
                     embed_dim,
                     ssm_cfg=ssm_cfg,
                     norm_epsilon=norm_epsilon,
@@ -561,7 +547,7 @@ class PixelDecoder(nn.Module):
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         
         self.decoder_blocks = nn.ModuleList([
-            create_block(
+            create_block_ViM(
                 decoder_embed_dim,
                 ssm_cfg=None,
                 norm_epsilon=1e-5,

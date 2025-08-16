@@ -2,7 +2,7 @@
 # This file contains all the parameters for training the gaze estimation model
 
 model:
-  name: vit_base_dim512_no_depth_patch16_160
+  name: videomamba_base_dim512_patch16_160
   tubelet_size: 2
   input_size: 160
   drop: 0.0
@@ -11,11 +11,13 @@ model:
   use_mean_pooling: True
   # depth: 16
 
+  keep_temporal_dim: True  # Keep temporal dimension for gaze estimation
+
   use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]   # [DEBUG] ? why different in pretrain ? 
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -36,7 +38,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 32
+  batch_size: 24
   num_workers: 20
   pin_memory: true
 
@@ -88,7 +90,7 @@ optimization:
   layer_decay: 0.75
 
 training:
-  epochs: 50
+  epochs: 100
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 1
@@ -107,7 +109,7 @@ training:
   save_ckpt: true
   auto_resume: true
   resume: ''
-  finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
+  finetune: /home/qzk/Facial-Foundation-Model/output/mamba_pretrain_debug/checkpoint-99.pth
   
   # Validation metric
   val_metric: acc1
@@ -139,7 +141,8 @@ system:
   save_feature: false
 
 wandb:
-  use_wandb: false
-  wandb_project: Facial-Foundation-Model
-  wandb_entity: your_entity_name
-  wandb_run_name: gaze360_finetune_experiment
+  use_wandb: true
+  project: 'facial-foundation-model'
+  entity: Facial-Foundation  # Your wandb username or team name
+  RUN_NAME: 'finetune gaze360 on mamba 8.7 4 '
+  TAGS: [gaze360, finetune, mamba]

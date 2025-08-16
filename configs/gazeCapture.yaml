@@ -11,6 +11,8 @@ model:
   use_mean_pooling: True
   # depth: 16
 
+  keep_temporal_dim: True  # Keep temporal dimension for gaze estimation
+
   use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
   
   # Attention configuration
@@ -25,8 +27,8 @@ model:
   lg_no_third: false
 
 data:
-  dataset_name: Gaze360
-  data_path: saved/data/gaze360T
+  dataset_name: GazeCapture
+  data_path: saved/data/GazeCapture
   eval_data_path: null
   task: regression
   num_classes: 2
@@ -36,7 +38,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 32
+  batch_size: 48
   num_workers: 20
   pin_memory: true
 
@@ -122,7 +124,7 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/gaze360_finetune_yaml_config
+  output_dir: ./output/GazeCapture_finetune_yaml_config
   log_dir: null
   
   # Distributed training
@@ -140,6 +142,7 @@ system:
 
 wandb:
   use_wandb: false
-  wandb_project: Facial-Foundation-Model
-  wandb_entity: your_entity_name
-  wandb_run_name: gaze360_finetune_experiment
+  project: 'facial-foundation-model'
+  entity: Facial-Foundation  # Your wandb username or team name
+  RUN_NAME: 'finetune gazeCapture 8.7'
+  TAGS: [gazeCapture, finetune, ViT]

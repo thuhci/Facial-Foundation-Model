@@ -87,9 +87,12 @@ def init_distributed_mode():
     # 如果配置还没有加载，先检查环境变量设置基本参数
     if not hasattr(cfg, '_content') or not cfg._content:
         # 配置尚未加载，使用默认值或环境变量
-        if cfg.SYSTEM.DIST_BACKEND == 'nccl':  # 默认值
-            cfg.SYSTEM.DIST_BACKEND = 'gloo'  # 临时设为 gloo 避免问题
-    
+        cfg.SYSTEM.DIST_BACKEND = os.environ.get('DIST_BACKEND', 'nccl')
+        cfg.SYSTEM.DIST_URL = os.environ.get('DIST_URL', 'tcp://localhost:12345')
+        cfg.SYSTEM.WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
+        cfg.SYSTEM.LOCAL_RANK = int(os.environ.get('LOCAL_RANK', 0))
+        cfg.SYSTEM.GPU = int(os.environ.get('GPU', 0))
+
     if cfg.SYSTEM.DIST_ON_ITP:
         cfg.SYSTEM.LOCAL_RANK = int(os.environ['OMPI_COMM_WORLD_RANK'])
         cfg.SYSTEM.WORLD_SIZE = int(os.environ['OMPI_COMM_WORLD_SIZE'])

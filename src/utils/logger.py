@@ -179,17 +179,19 @@ class TensorboardLogger(object):
             self.step += 1
 
     def update(self, head='scalar', step=None, **kwargs):
+        """Log metrics to tensorboard with head as prefix."""
         for k, v in kwargs.items():
             if v is None:
                 continue
             if isinstance(v, torch.Tensor):
-                if v.size() == 1:
+                if v.numel() == 1:
                     v = v.item()
                 else:
                     continue
-                # v = v.item()
             assert isinstance(v, (float, int))
-            self.writer.add_scalar(head + "/" + k, v, self.step if step is None else step)
+            # Use provided step or current step
+            current_step = step if step is not None else self.step
+            self.writer.add_scalar(head + "/" + k, v, current_step)
 
     def flush(self):
         self.writer.flush()
@@ -201,6 +203,7 @@ class WandbLogger(object):
     def __init__(self):
         self.run = None
         self.step = 0
+        self.last_step = 0  # Track last logged step to avoid going backwards
         self.initialized = False
         
     def init_wandb(self, config_dict: Optional[Dict] = None, resume_id: Optional[str] = None):
@@ -307,9 +310,20 @@ class WandbLogger(object):
                     except (ValueError, TypeError):
                         print(f"Warning: Cannot log metric {key} with value {value}")
             
-            # Log to wandb
+            # Log to wandb - ensure we don't go backwards in steps
             if processed_metrics:
-                self.run.log(processed_metrics, step=step or self.step)
+                if step is not None:
+                    # Use the provided step, but ensure it's not less than last_step
+                    current_step = max(step, self.last_step)
+                else:
+                    # Auto increment from last step
+                    current_step = self.last_step + 1
+                
+                # Update last_step
+                self.last_step = current_step
+                
+                # Log to wandb
+                self.run.log(processed_metrics, step=current_step)
                 
         except Exception as e:
             print(f"Failed to log metrics to wandb: {e}")
@@ -471,6 +485,7 @@ class CombinedLogger(object):
         
         self.cfg = get_cfg()
         self.step = 0
+        self.global_step = 0  # Global step counter
         
         # Initialize TensorBoard logger if log_dir is provided
         self.tb_logger = None
@@ -515,23 +530,34 @@ class CombinedLogger(object):
         """Set step for both loggers."""
         if step is not None:
             self.step = step
+            self.global_step = step
         else:
             self.step += 1
+            self.global_step += 1
             
         if self.tb_logger is not None:
-            self.tb_logger.set_step(step)
+            self.tb_logger.set_step(self.step)
         if self.wandb_logger is not None:
-            self.wandb_logger.set_step(step)
+            self.wandb_logger.set_step(self.step)
     
     def update(self, head: str = 'scalar', step: Optional[int] = None, **kwargs):
         """Update both loggers with metrics."""
-        # Log to TensorBoard
+        # Determine the step to use for TensorBoard (can use any step)
+        if step is not None:
+            tb_step = step
+            # For wandb, ensure monotonic increasing steps
+            wandb_step = max(step, self.wandb_logger.last_step + 1) if self.wandb_logger is not None else step
+        else:
+            tb_step = self.global_step
+            wandb_step = self.global_step
+            
+        # Log to TensorBoard (can handle any step)
         if self.tb_logger is not None:
-            self.tb_logger.update(head=head, step=step, **kwargs)
+            self.tb_logger.update(head=head, step=tb_step, **kwargs)
         
-        # Log to Wandb
+        # Log to Wandb (with monotonic step handling)
         if self.wandb_logger is not None:
-            self.wandb_logger.update(head=head, step=step, **kwargs)
+            self.wandb_logger.update(head=head, step=wandb_step, **kwargs)
     
     def flush(self):
         """Flush both loggers."""

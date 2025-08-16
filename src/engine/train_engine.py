@@ -124,7 +124,7 @@ class TrainingEngine:
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
     
-    def _process_batch(self, batch_data: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _process_batch(self, batch_data: Tuple):
         """Process batch data and apply mixup if needed."""
         samples, targets, _, _ = batch_data
         samples = samples.to(self.device, non_blocking=True)
@@ -145,16 +145,25 @@ class TrainingEngine:
         # Ensure correct data types
         if self.cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
-        else:
+        elif self.cfg.DATA.TASK == 'class':
             targets = targets.long()   # Classification task
-        
+        elif self.cfg.DATA.TASK == 'combine':
+            cls_tar = targets[..., 0].long()  # First column for classification
+            reg_tar = targets[..., 1:].float()  # All but first column for regression
+            targets = {
+                "cls": cls_tar,
+                "reg": reg_tar
+            }
+        else:
+            raise ValueError(f"Unknown task: {self.cfg.DATA.TASK}")
+
         # Apply mixup if enabled
         if self.mixup_fn is not None:
             samples, targets = self.mixup_fn(samples, targets)
             
         return samples, targets
     
-    def _forward_pass(self, samples: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_pass(self, samples: torch.Tensor, targets) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass with task-specific handling."""
         if self.loss_scaler is None:
             # DeepSpeed mode
@@ -165,7 +174,7 @@ class TrainingEngine:
             with torch.cuda.amp.autocast():
                 return self._forward_task_specific(samples, targets)
     
-    def _forward_task_specific(self, samples: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_task_specific(self, samples: torch.Tensor, targets) -> Tuple[torch.Tensor, torch.Tensor]:
         """Task-specific forward pass."""
         outputs = self.model(samples)
         
@@ -187,13 +196,25 @@ class TrainingEngine:
                     targets = targets.reshape(-1, 2)
                 targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                 outputs = outputs.reshape(-1, 2)  # Ensure outputs are also 2D angles
+                # print(f"[DEBUG] outputs shape: {outputs.shape}, targets shape: {targets.shape}")
+                # print(f"[DEBUG] example outputs: {outputs[0:5]}, example targets: {targets[0:5]}")
                 loss = self.criterion(outputs, targets)
                 return loss, outputs
+        elif self.cfg.DATA.TASK == 'combine':
+            cls_tar = targets["cls"]
+            reg_tar = targets["reg"]
+            cls_pred = outputs['cls']
+            reg_pred = outputs['reg']
+            cls_loss = self.criterion['cls_criterion'](cls_pred, cls_tar)
+            reg_loss = self.criterion['reg_criterion'](reg_pred, reg_tar) 
+            loss = self.cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss
+            return loss, outputs
+        
         else:
             # Classification task
             # print("example outputs", outputs[0:5])
             # print("example targets", targets[0:5])
-            
+            # print("[DEBUG] output shape", outputs.shape, "targets shape:", targets.shape)
             loss = self.criterion(outputs, targets)
             return loss, outputs
     
@@ -242,7 +263,7 @@ class TrainingEngine:
         return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
     
     def _update_metrics(self, metric_logger, loss: torch.Tensor, output: torch.Tensor, 
-                        targets: torch.Tensor, grad_norm: Optional[float]):
+                        targets , grad_norm: Optional[float]):
         """Update training metrics."""
         loss_value = loss.item()
         loss_scale_value = self._get_loss_scale_for_deepspeed() if self.loss_scaler is None else self.loss_scaler.state_dict()["scale"]
@@ -265,8 +286,17 @@ class TrainingEngine:
                     targets = targets.reshape(-1, 2)  # Ensure correct shape
                 # print(f"[DEBUG] targets shape after processing: {targets.shape}, shape of output: {output.shape}")
                 angular_error = compute_angular_error(output, targets)
-                class_acc = angular_error
+                class_acc = None
                 metric_logger.update(angular_error=angular_error)
+            elif self.cfg.DATA.TASK == 'combine':
+                cls_tar = targets["cls"]
+                reg_tar = targets["reg"]
+                cls_pred = output['cls']
+                reg_pred = output["reg"]
+                class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
+                angular_error = compute_angular_error(reg_pred, reg_tar)
+                metric_logger.update(angular_error=angular_error)
+
             else:
                 # Classification task
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
@@ -297,7 +327,7 @@ class TrainingEngine:
         metric_logger.update(grad_norm=grad_norm)
     
     def _log_metrics(self, loss: torch.Tensor, output: torch.Tensor, 
-                     targets: torch.Tensor, grad_norm: Optional[float]):
+                     targets , grad_norm: Optional[float]):
         """Log metrics to tensorboard."""
         if self.log_writer is None:
             return
@@ -318,6 +348,14 @@ class TrainingEngine:
                     angular_error = compute_angular_error(output, targets)
                     self.log_writer.update(angular_error=angular_error, head="loss")
                 class_acc = 0.0  # Placeholder for gaze
+            elif self.cfg.DATA.TASK == 'combine':
+                cls_tar = targets["cls"]
+                reg_tar = targets["reg"]
+                cls_pred = output['cls']
+                reg_pred = output["reg"]
+                class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
+                angular_error = compute_angular_error(reg_pred, reg_tar)
+                self.log_writer.update(angular_error=angular_error, head="loss")
             else:
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
                 self.log_writer.update(class_acc=class_acc, head="loss")

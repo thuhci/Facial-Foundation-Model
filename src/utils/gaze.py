@@ -2,9 +2,11 @@ import torch
 from typing import Dict, Any
 from torch.utils.data import DataLoader
 from src.utils.config import get_cfg
+import torch.nn as nn
 
 def spherical_to_cartesian(spherical_coords):
     """将球坐标转换为笛卡尔坐标"""
+    spherical_coords = nn.functional.normalize(spherical_coords)
     pitch = spherical_coords[..., 0]  # 俯仰角
     yaw = spherical_coords[..., 1]    # 偏航角
     
@@ -43,6 +45,8 @@ def compute_angular_error(pred_spherical, target_spherical):
 
 def gaze3d_to_gaze2d(gaze_3d):
     """将3D gaze向量转换为2D角度（pitch, yaw）就是cartesian_to_spherical"""
+    #  normalize gaze3d
+    gaze_3d = nn.functional.normalize(gaze_3d)
     x = gaze_3d[..., 0]
     y = gaze_3d[..., 1]
     z = gaze_3d[..., 2]

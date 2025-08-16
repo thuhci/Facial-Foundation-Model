@@ -277,10 +277,16 @@ class VisionTransformer(nn.Module):
         
         # [QZK]: for L2CS on Gaze
         if isinstance(self.head, nn.ModuleDict):
-            return {
-                'pitch': self.head['pitch'](x),
-                'yaw': self.head['yaw'](x)
-            }
+            if 'pitch' in self.head:
+                return {
+                    'pitch': self.head['pitch'](x),
+                    'yaw': self.head['yaw'](x)
+                }
+            elif 'reg' in self.head:
+                return{
+                    "reg": self.head['reg'](x),
+                    "cls": self.head['cls'](x)
+                }
             
         x = self.head(x)
         # me: add head activation function support

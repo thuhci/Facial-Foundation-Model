@@ -389,7 +389,7 @@ def build_dataset(is_train, test_mode):
         )
         nb_classes = 6
 
-    elif cfg.DATA.DATASET_NAME == 'Gaze360':
+    elif cfg.DATA.DATASET_NAME == 'Gaze360' or cfg.DATA.DATASET_NAME == 'GazeCapture':
         mode = None
         anno_path = None
         if is_train is True:
@@ -419,8 +419,68 @@ def build_dataset(is_train, test_mode):
             file_ext='jpg',
         )
         nb_classes = 2
+
+    elif cfg.DATA.DATASET_NAME == 'DFEW_combine':
+        mode = None
+        anno_path = None
+        if is_train is True:
+            mode = 'train'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'train')
+        elif test_mode is True:
+            mode = 'test'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test')
+        else:
+            mode = 'validation'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val')
+
+        from src.dataset.kinetics import VideoRegDatasetFrame
+        dataset = VideoRegDatasetFrame(
+            anno_path=anno_path,
+            data_path='/',
+            mode=mode,
+            clip_len=cfg.DATA.NUM_FRAMES,
+            frame_sample_rate=cfg.DATA.SAMPLING_RATE,
+            num_segment=1,
+            test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
+            test_num_crop=cfg.DATA.TEST_NUM_CROP,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=cfg.MODEL.INPUT_SIZE,
+            short_side_size=cfg.DATA.SHORT_SIDE_SIZE,
+            file_ext='jpg',
+        )
+        nb_classes = 7
         
-        
+    elif cfg.DATA.DATASET_NAME == 'MAFW_combine':
+        mode = None
+        anno_path = None
+        if is_train is True:
+            mode = 'train'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'train')
+        elif test_mode is True:
+            mode = 'test'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test')
+        else:
+            mode = 'validation'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val')
+
+        from src.dataset.kinetics import VideoRegDatasetFrame
+        dataset = VideoRegDatasetFrame(
+            anno_path=anno_path,
+            data_path='/',
+            mode=mode,
+            clip_len=cfg.DATA.NUM_FRAMES,
+            frame_sample_rate=cfg.DATA.SAMPLING_RATE,
+            num_segment=1,
+            test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
+            test_num_crop=cfg.DATA.TEST_NUM_CROP,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=cfg.MODEL.INPUT_SIZE,
+            short_side_size=cfg.DATA.SHORT_SIDE_SIZE,
+            file_ext='png',
+        )
+        nb_classes = 11
         
     elif cfg.DATA.DATASET_NAME == 'EVE':
         mode = None

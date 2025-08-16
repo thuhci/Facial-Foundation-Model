@@ -118,7 +118,27 @@ def create_model_from_config():
     
     # Handle model name variations
     model_name = cfg.MODEL.NAME
-    if 'no_depth' in model_name and cfg.MODEL.DEPTH is not None:
+    
+    # Check if this is a ViM (Video Mamba) model
+    if 'mamba' in model_name.lower() or 'vim' in model_name.lower():
+        print(f"==> Creating ViM model: {model_name}")
+        
+        # Create ViM model with specific parameters
+        model = create_model(
+            model_name,
+            pretrained=False,
+            num_classes=cfg.DATA.NUM_CLASSES,
+            # patch_size=cfg.MODEL.PATCH_SIZE if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16,
+            # num_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
+            tubelet_size=cfg.MODEL.TUBELET_SIZE,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
+            # embed_dim=getattr(cfg.MODEL, 'EMBED_DIM', 576),
+            depth=getattr(cfg.MODEL, 'DEPTH', 32),
+            use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
+            keep_temporal_dim=cfg.MODEL.KEEP_TEMPORAL_DIM,
+        )
+        
+    elif 'no_depth' in model_name and cfg.MODEL.DEPTH is not None:
         print(f"==> Note: use custom model depth={cfg.MODEL.DEPTH}!")
         model = create_model(
             model_name,
@@ -182,17 +202,34 @@ def create_model_from_config():
         else:
             # 原始方式：直接回归2个角度
             model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+    elif cfg.DATA.TASK == "combine":
+        in_features = model.head.in_features
+        model.head = torch.nn.ModuleDict({
+            'reg': torch.nn.Linear(in_features, cfg.DATA.NUM_DIM_REG),
+            'cls': torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES_CLS)
+        })
     else:
+        # classification
         model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
     
-    patch_size = model.patch_embed.patch_size
+    # Get patch size (handle both ViT and ViM models)
+    if hasattr(model, 'patch_embed') and hasattr(model.patch_embed, 'patch_size'):
+        patch_size = model.patch_embed.patch_size
+        if isinstance(patch_size, (list, tuple)):
+            patch_size = patch_size
+        else:
+            patch_size = (patch_size, patch_size)
+    else:
+        # Fallback for ViM models or models without patch_size attribute
+        patch_size = (cfg.MODEL.PATCH_SIZE[0] if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16,
+                     cfg.MODEL.PATCH_SIZE[1] if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16)
+    
     print("Patch size = %s" % str(patch_size))
-    # args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
-    # args.patch_size = patch_size
-    # cfg.MODEL.PATCH_SIZE = patch_size
+    
+    # Update config with computed values
     cfg.MODEL.WINDOW_SIZE = (cfg.DATA.NUM_FRAMES // cfg.MODEL.TUBELET_SIZE,
                              cfg.MODEL.INPUT_SIZE // patch_size[0],
-                                cfg.MODEL.INPUT_SIZE // patch_size[1])
+                             cfg.MODEL.INPUT_SIZE // patch_size[1])
     cfg.MODEL.PATCH_SIZE = patch_size
 
     if cfg.TRAINING.FINETUNE:
@@ -302,6 +339,12 @@ def create_criterion_from_config():
             criterion = l2cs_criterion
         else:
             criterion = torch.nn.MSELoss()
+    elif cfg.DATA.TASK == "combine":
+        criterion = {
+            "cls_criterion": torch.nn.CrossEntropyLoss(),
+            "reg_criterion": torch.nn.MSELoss()
+        }
+
     else:
         # Classification task
         mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
@@ -672,6 +715,16 @@ def main(args):
                     utils.save_model(
                         "best", model, model_without_ddp, optimizer, 
                         loss_scaler, model_ema)
+        # elif cfg.DATA.TASK == "combine":
+        #     current_metric = test_stats.get('mean_angle_error', 1e8)
+        #     if current_metric < max_accuracy or epoch == start_epoch:
+        #         max_accuracy = current_metric
+        #         best_epoch = epoch
+        #         # Save best model
+        #         if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+        #             utils.save_model(
+        #                 "best", model, model_without_ddp, optimizer, 
+                        # loss_scaler, model_ema)
         else:
             # For classification, we can choose different metrics for best model selection
             metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
@@ -700,6 +753,7 @@ def main(args):
         
         # Save detailed results
         final_results = {
+            'angular_err': final_test_stats.get('angular_err', None),
             'final_acc1': final_test_stats.get('acc1', 0),
             'final_acc5': final_test_stats.get('acc5', 0),
             'final_uar': final_test_stats.get('uar', 0),
@@ -712,6 +766,7 @@ def main(args):
         }
         
         print(f"Final Results:")
+        print(f"Angular Error: {final_results['angular_err']:.4f}")
         print(f"Acc@1: {final_results['final_acc1']:.4f}")
         print(f"Acc@5: {final_results['final_acc5']:.4f}")
         print(f"UAR: {final_results['final_uar']:.4f}")

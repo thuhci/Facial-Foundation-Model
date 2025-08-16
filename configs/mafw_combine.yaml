@@ -9,9 +9,7 @@ model:
   attn_drop_rate: 0.0
   drop_path: 0.1
   use_mean_pooling: True
-  # depth: 16
-
-  use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
+  depth: 16
   
   # Attention configuration
   attn_type: local_global
@@ -20,16 +18,17 @@ model:
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
   lg_attn_param_sharing_all: false
-  lg_classify_token_type: org
+  lg_classify_token_type: region
   lg_no_second: false
   lg_no_third: false
 
 data:
-  dataset_name: Gaze360
-  data_path: saved/data/gaze360T
+  dataset_name: MAFW_combine
+  data_path: /home/qzk/Facial-Foundation-Model/saved/data/mafw_combine/split01
   eval_data_path: null
-  task: regression
-  num_classes: 2
+  num_classes: 11
+  num_classes_cls: 11
+  num_dim_reg: 2
   num_segments: 1
   num_frames: 16
   sampling_rate: 4
@@ -40,6 +39,8 @@ data:
   num_workers: 20
   pin_memory: true
 
+  task: combine
+
 augmentation:
   # Basic augmentation
   color_jitter: 0.4
@@ -47,7 +48,7 @@ augmentation:
   num_sample: 1  # Disabled for gaze estimation
   
   # Auto augmentation (disabled for gaze)
-  auto_augment: rand-m7-n4-mstd0.5-inc0
+  # auto_augment: null
   
   # Mixup augmentation (disabled for gaze estimation)
   mixup: 0.0
@@ -64,13 +65,14 @@ augmentation:
   random_erase_split: false
   
   # Label smoothing (disabled for regression)
-  label_smoothing: 0.0
+  label_smoothing: 0.1
 
 optimization:
   optimizer: adamw
   lr: 0.001
   min_lr: 0.000001
   warmup_lr: 0.000001
+  # warmup_lr: 0.001
   weight_decay: 0.05
   weight_decay_end: null
   
@@ -88,10 +90,11 @@ optimization:
   layer_decay: 0.75
 
 training:
-  epochs: 50
+  epochs: 100
   start_epoch: 0
   update_freq: 1
-  save_ckpt_freq: 1
+  save_ckpt_freq: 10
+  combine_loss_alpha : 0.5  # Weight for classification loss in combined loss
   
   # Model EMA
   model_ema: false
@@ -108,7 +111,8 @@ training:
   auto_resume: true
   resume: ''
   finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
-  
+  # finetune: null
+
   # Validation metric
   val_metric: acc1
 
@@ -122,7 +126,7 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/gaze360_finetune_yaml_config
+  output_dir: ./output/mafw_finetune_yaml_config
   log_dir: null
   
   # Distributed training
@@ -130,16 +134,11 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 不启用分布式训练
+  distributed: true  # 启用分布式训练
+  backend: nccl
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false
   
   # Features
   save_feature: false
-
-wandb:
-  use_wandb: false
-  wandb_project: Facial-Foundation-Model
-  wandb_entity: your_entity_name
-  wandb_run_name: gaze360_finetune_experiment
