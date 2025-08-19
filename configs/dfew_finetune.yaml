@@ -11,9 +11,10 @@ model:
   use_mean_pooling: True
   depth: 16
   
+  
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 5, 10]
+  lg_region_size: [2, 2, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -24,18 +25,22 @@ model:
 
 data:
   dataset_name: DFEW
-  data_path: saved/data/dfew_224/org/split05
+  data_path: /home/qzk/Facial-Foundation-Model/saved/data/dfew_224/org/split01
   eval_data_path: null
   num_classes: 7
+  # num_classes_cls: 7
+  # num_dim_reg: 2
   num_segments: 1
   num_frames: 16
-  sampling_rate: 4
+  sampling_rate: 1
   imagenet_default_mean_and_std: true
   
   # Data loading
   batch_size: 32
-  num_workers: 4
+  num_workers: 20
   pin_memory: true
+
+  task: classification
 
 augmentation:
   # Basic augmentation

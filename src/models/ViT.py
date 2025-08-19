@@ -241,20 +241,25 @@ class VisionTransformer(nn.Module):
         if self.fc_norm is not None:
             # me: add frame-level prediction support
             if self.keep_temporal_dim:
-                # x = rearrange(x, 'b (t hw) c -> b c t hw',
-                #               t=self.patch_embed.temporal_seq_len,
-                #               hw=self.patch_embed.spatial_num_patches)
-                # x = x.mean(-1) # (B, C, T)
+                # print("[DEBUG] keep_temporal_dim is True, x shape before rearrange:", x.shape)
+                x = rearrange(x, 'b (t hw) c -> b c t hw',
+                              t=self.patch_embed.temporal_seq_len,
+                              hw=self.patch_embed.spatial_num_patches)
+                # print("[DEBUG] keep_temporal_dim is True, x shape after rearrange:", x.shape)
+                x = x.mean(-1) # (B, C, T)
                 # original one don't seem to work
-                x = rearrange(x, 'b t c -> b c t')  # (B, embed_dim, T)
-                     
-                # print("shape of x after spatial mean pooling:", x.shape)
+                # x = rearrange(x, 'b t c -> b c t')  # (B, embed_dim, T)
+                # print("[DEBUG] keep_temporal_dim is True, x shape after mean pooling:", x.shape)
+                                # print("shape of x after spatial mean pooling:", x.shape)
                 # temporal upsample: 8 -> 16, for patch embedding reduction
+                # print("[DEBUG] keep_temporal_dim is True, x shape before temporal upsample:", x.shape)
                 x = torch.nn.functional.interpolate(
                     x, scale_factor=self.patch_embed.tubelet_size,
                     mode='linear'
                 )
+                # print("[DEBUG] keep_temporal_dim is True, x shape after temporal upsample:", x.shape)
                 x = rearrange(x, 'b c t -> b t c')
+                # print("[DEBUG] keep_temporal_dim is True, x shape after temporal upsample:", x.shape)
                 return self.fc_norm(x)
             else:
                 return self.fc_norm(x.mean(1))
@@ -272,16 +277,23 @@ class VisionTransformer(nn.Module):
         
         # [QZK]: for L2CS on Gaze
         if isinstance(self.head, nn.ModuleDict):
-            return {
-                'pitch': self.head['pitch'](x),
-                'yaw': self.head['yaw'](x)
-            }
+            if 'pitch' in self.head:
+                return {
+                    'pitch': self.head['pitch'](x),
+                    'yaw': self.head['yaw'](x)
+                }
+            elif 'reg' in self.head:
+                return{
+                    "reg": self.head['reg'](x),
+                    "cls": self.head['cls'](x)
+                }
             
         x = self.head(x)
         # me: add head activation function support
         x = self.head_activation_func(x)
         # me: add frame-level prediction support
         if self.keep_temporal_dim:
+            # print("[DEBUG] keep_temporal_dim is True, x shape before reshape:", x.shape)
             x = x.view(x.size(0), -1) # (B,T,C) -> (B,T*C)
         if save_feature:
             return x, feature

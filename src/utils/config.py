@@ -29,6 +29,7 @@ _C.MODEL.INIT_SCALE = 0.001
 _C.MODEL.WITH_CP = False
 _C.MODEL.COS_ATTN = False
 _C.MODEL.KEEP_TEMPORAL_DIM = False  # Whether to keep temporal dimension in output
+_C.MODEL.PATCH_SIZE = [16, 16]
 
 # patch embedding configuration
 _C.MODEL.USE_ENHANCED_PATCH_EMBED = False  # Use enhanced patch embedding for better performance
@@ -38,7 +39,7 @@ _C.MODEL.MASK_TYPE = 'tube'
 _C.MODEL.WINDOW_SIZE = [8, 14, 14]
 _C.MODEL.MASK_RATIO = 0.75
 _C.MODEL.PART_WIN_SIZE = [8, 7, 7]
-_C.MODEL.PART_APPLY_SYMMETRY = True
+_C.MODEL.PART_APPLY_SYMMETRY = None  # 'global', 'local', or None
 
 # Attention configuration
 _C.MODEL.ATTN_TYPE = 'local_global'
@@ -69,6 +70,8 @@ _C.DATA.DATA_PATH = '/path/to/data'
 _C.DATA.TASK = 'class'
 _C.DATA.EVAL_DATA_PATH = None
 _C.DATA.NUM_CLASSES = 400
+_C.DATA.NUM_DIM_REG = 2
+_C.DATA.NUM_CLASSES_CLS = 5
 _C.DATA.NUM_SEGMENTS = 1
 _C.DATA.NUM_FRAMES = 16
 _C.DATA.SAMPLING_RATE = 4
@@ -79,12 +82,13 @@ _C.DATA.PIN_MEMORY = True
 _C.DATA.TEST_NUM_SEGMENT = 5
 _C.DATA.TEST_NUM_CROP = 3
 _C.DATA.SHORT_SIDE_SIZE = 320
+_C.DATA.CLIP_STRIDE = 1
 
 # Augmentation configuration
 _C.AUGMENTATION = CN()
 _C.AUGMENTATION.COLOR_JITTER = 0.4
 _C.AUGMENTATION.TRAIN_INTERPOLATION = 'bicubic'
-_C.AUGMENTATION.NUM_SAMPLE = 2
+_C.AUGMENTATION.NUM_SAMPLE = 1
 _C.AUGMENTATION.AUTO_AUGMENT = 'rand-m7-n4-mstd0.5-inc1'
 _C.AUGMENTATION.MIXUP = 0.8
 _C.AUGMENTATION.CUTMIX = 1.0
@@ -122,6 +126,7 @@ _C.TRAINING = CN()
 _C.TRAINING.EPOCHS = 30
 _C.TRAINING.START_EPOCH = 0
 _C.TRAINING.UPDATE_FREQ = 1
+_C.TRAINING.COMBINE_LOSS_ALPHA = 1
 _C.TRAINING.SAVE_CKPT_FREQ = 100
 _C.TRAINING.MODELEMA_ = False
 _C.TRAINING.MODEL_EMA_DECAY = 0.9999
@@ -158,6 +163,20 @@ _C.SYSTEM.GPU = -1  # Default GPU, will be set in init_distributed_mode
 # _C.SYSTEM.RANK = 0  # Default rank, will be set in init_distributed_mode
 _C.SYSTEM.DISTRIBUTED = False  # Default distributed mode, will be set in init_distributed_mode
 _C.SYSTEM.DIST_BACKEND = 'nccl'  # Default backend for distributed training
+
+# Wandb configuration
+_C.WANDB = CN()
+_C.WANDB.USE_WANDB = False
+_C.WANDB.PROJECT = 'facial-foundation-model'
+_C.WANDB.ENTITY = None  # Your wandb username or team name
+_C.WANDB.RUN_NAME = None  # If None, will auto-generate based on config
+_C.WANDB.TAGS = []  # List of tags for the run
+_C.WANDB.NOTES = ""  # Notes for the run
+_C.WANDB.MODE = 'online'  # 'online', 'offline', 'disabled'
+_C.WANDB.SAVE_CODE = True  # Save code to wandb
+_C.WANDB.LOG_FREQ = 50  # Log frequency (every N steps)
+_C.WANDB.WATCH_MODEL = True  # Whether to watch model gradients
+_C.WANDB.WATCH_LOG = 'all'  # 'gradients', 'parameters', 'all', or None
 
 
 def get_cfg_defaults():

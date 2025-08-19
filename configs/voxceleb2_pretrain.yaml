@@ -10,6 +10,7 @@ model:
   drop_path: 0.1
   use_mean_pooling: True
   mask_ratio: 0.9
+  mask_type: part_window
   encoder_depth: 16
   decoder_depth: 4
   normalize_target: true
@@ -38,8 +39,8 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 4  # Small batch size for pretraining
-  num_workers: 4
+  batch_size: 48  # Small batch size for pretraining
+  num_workers: 20
   pin_memory: true
 
 augmentation:

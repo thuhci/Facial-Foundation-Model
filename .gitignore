@@ -1,5 +1,6 @@
 .mae/
 output/
+outputs/
 *.pyc
 checkpoint/
 imgs/
@@ -9,3 +10,6 @@ __pycache__
 **/discarded*.py
 debug_data/
 *.txt
+wandb/
+# *.csv
+saved/

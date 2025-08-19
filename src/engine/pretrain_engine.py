@@ -173,7 +173,7 @@ class PretrainEngine:
         """Forward pass with task-specific handling."""
         with torch.cuda.amp.autocast():
             outputs = self.model(videos, bool_masked_pos)
-            
+            # print("[DEBUG] outputs shape:", outputs.shape, "labels shape:", labels.shape)
             # Compute loss
             if (self.cfg.PRETRAINING.USE_FRAME_DIFF_AS_TARGET and 
                 self.cfg.PRETRAINING.TARGET_DIFF_WEIGHT is not None):

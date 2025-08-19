@@ -36,7 +36,7 @@ from src.optim.mixup import Mixup
 from src.dataset.datasets import build_dataset
 from src.utils.utils import NativeScalerWithGradNormCount as NativeScaler
 from src.utils.utils import multiple_samples_collate
-from src.utils.logger import TensorboardLogger
+from src.utils.logger import create_logger, log_system_info
 from src.utils import utils
 
 from src.models import ViT, ViT_pretrain, layers
@@ -81,6 +81,7 @@ def create_data_loaders():
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     
     if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+        print("DEBUG: Using data augmentation with multiple samples")
         collate_func = partial(multiple_samples_collate, fold=False)
     else:
         collate_func = None
@@ -117,7 +118,27 @@ def create_model_from_config():
     
     # Handle model name variations
     model_name = cfg.MODEL.NAME
-    if 'no_depth' in model_name and cfg.MODEL.DEPTH is not None:
+    
+    # Check if this is a ViM (Video Mamba) model
+    if 'mamba' in model_name.lower() or 'vim' in model_name.lower():
+        print(f"==> Creating ViM model: {model_name}")
+        
+        # Create ViM model with specific parameters
+        model = create_model(
+            model_name,
+            pretrained=False,
+            num_classes=cfg.DATA.NUM_CLASSES,
+            # patch_size=cfg.MODEL.PATCH_SIZE if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16,
+            # num_frames=cfg.DATA.NUM_FRAMES * cfg.DATA.NUM_SEGMENTS,
+            tubelet_size=cfg.MODEL.TUBELET_SIZE,
+            drop_path_rate=cfg.MODEL.DROP_PATH,
+            # embed_dim=getattr(cfg.MODEL, 'EMBED_DIM', 576),
+            depth=getattr(cfg.MODEL, 'DEPTH', 32),
+            use_mean_pooling=cfg.MODEL.USE_MEAN_POOLING,
+            keep_temporal_dim=cfg.MODEL.KEEP_TEMPORAL_DIM,
+        )
+        
+    elif 'no_depth' in model_name and cfg.MODEL.DEPTH is not None:
         print(f"==> Note: use custom model depth={cfg.MODEL.DEPTH}!")
         model = create_model(
             model_name,
@@ -181,17 +202,34 @@ def create_model_from_config():
         else:
             # 原始方式：直接回归2个角度
             model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+    elif cfg.DATA.TASK == "combine":
+        in_features = model.head.in_features
+        model.head = torch.nn.ModuleDict({
+            'reg': torch.nn.Linear(in_features, cfg.DATA.NUM_DIM_REG),
+            'cls': torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES_CLS)
+        })
     else:
+        # classification
         model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
     
-    patch_size = model.patch_embed.patch_size
+    # Get patch size (handle both ViT and ViM models)
+    if hasattr(model, 'patch_embed') and hasattr(model.patch_embed, 'patch_size'):
+        patch_size = model.patch_embed.patch_size
+        if isinstance(patch_size, (list, tuple)):
+            patch_size = patch_size
+        else:
+            patch_size = (patch_size, patch_size)
+    else:
+        # Fallback for ViM models or models without patch_size attribute
+        patch_size = (cfg.MODEL.PATCH_SIZE[0] if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16,
+                     cfg.MODEL.PATCH_SIZE[1] if hasattr(cfg.MODEL, 'PATCH_SIZE') else 16)
+    
     print("Patch size = %s" % str(patch_size))
-    # args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
-    # args.patch_size = patch_size
-    # cfg.MODEL.PATCH_SIZE = patch_size
+    
+    # Update config with computed values
     cfg.MODEL.WINDOW_SIZE = (cfg.DATA.NUM_FRAMES // cfg.MODEL.TUBELET_SIZE,
                              cfg.MODEL.INPUT_SIZE // patch_size[0],
-                                cfg.MODEL.INPUT_SIZE // patch_size[1])
+                             cfg.MODEL.INPUT_SIZE // patch_size[1])
     cfg.MODEL.PATCH_SIZE = patch_size
 
     if cfg.TRAINING.FINETUNE:
@@ -301,6 +339,12 @@ def create_criterion_from_config():
             criterion = l2cs_criterion
         else:
             criterion = torch.nn.MSELoss()
+    elif cfg.DATA.TASK == "combine":
+        criterion = {
+            "cls_criterion": torch.nn.CrossEntropyLoss(),
+            "reg_criterion": torch.nn.MSELoss()
+        }
+
     else:
         # Classification task
         mixup_active = cfg.AUGMENTATION.MIXUP > 0 or cfg.AUGMENTATION.CUTMIX > 0
@@ -518,9 +562,32 @@ def main(args):
     )
     
     # Create log writer
-    log_writer = TensorboardLogger(
-        log_dir=cfg.SYSTEM.OUTPUT_DIR,
+    log_dir = None
+    if cfg.SYSTEM.LOG_DIR is not None:
+        log_dir = cfg.SYSTEM.LOG_DIR
+        os.makedirs(log_dir, exist_ok=True)
+    elif cfg.SYSTEM.OUTPUT_DIR:
+        log_dir = os.path.join(cfg.SYSTEM.OUTPUT_DIR, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+    
+    log_writer = create_logger(
+        log_dir=log_dir,
+        config_dict={
+            'script_type': 'finetuning',
+            'num_parameters': n_parameters,
+            'total_batch_size': total_batch_size,
+            'num_training_steps_per_epoch': num_training_steps_per_epoch,
+            'num_classes': cfg.DATA.NUM_CLASSES
+        }
     )
+    
+    # Log system information
+    log_system_info(log_writer)
+    
+    # Log model architecture
+    if utils.get_rank() == 0:
+        log_writer.log_model_info(model, (cfg.DATA.BATCH_SIZE, 3, cfg.DATA.NUM_FRAMES, cfg.MODEL.INPUT_SIZE, cfg.MODEL.INPUT_SIZE))
+        log_writer.watch_model(model)
     
     # Create training engine
     training_engine = TrainingEngine(
@@ -553,6 +620,7 @@ def main(args):
         #         loss_scaler.load_state_dict(checkpoint['scaler'])
         # else:
         #     start_epoch = 0
+        start_epoch = cfg.TRAINING.START_EPOCH
     else:
         start_epoch = 0
     
@@ -613,9 +681,28 @@ def main(args):
             'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
         }
         
-        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
-            with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        # Log validation metrics to wandb/tensorboard
+        if log_writer is not None:
+            # Set epoch step for logging
+            log_writer.set_step(epoch)
+            
+            # Log validation metrics with 'val' prefix
+            log_writer.update(head='val', step=epoch, **test_stats)
+            
+            # Log training metrics with 'train' prefix  
+            log_writer.update(head='train', step=epoch, **train_stats)
+            
+            # Log other epoch info
+            log_writer.update(head='epoch', step=epoch, 
+                            epoch=epoch, 
+                            n_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
+        
+        try:
+            if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
+                with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                    f.write(json.dumps(log_stats) + "\n")
+        except Exception as e:
+            print(f"Error saving log stats: {e}")
         
         # Track best accuracy and save best model
         if cfg.DATA.TASK == 'regression':
@@ -628,6 +715,16 @@ def main(args):
                     utils.save_model(
                         "best", model, model_without_ddp, optimizer, 
                         loss_scaler, model_ema)
+        # elif cfg.DATA.TASK == "combine":
+        #     current_metric = test_stats.get('mean_angle_error', 1e8)
+        #     if current_metric < max_accuracy or epoch == start_epoch:
+        #         max_accuracy = current_metric
+        #         best_epoch = epoch
+        #         # Save best model
+        #         if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+        #             utils.save_model(
+        #                 "best", model, model_without_ddp, optimizer, 
+                        # loss_scaler, model_ema)
         else:
             # For classification, we can choose different metrics for best model selection
             metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
@@ -656,6 +753,7 @@ def main(args):
         
         # Save detailed results
         final_results = {
+            'angular_err': final_test_stats.get('angular_err', None),
             'final_acc1': final_test_stats.get('acc1', 0),
             'final_acc5': final_test_stats.get('acc5', 0),
             'final_uar': final_test_stats.get('uar', 0),
@@ -668,6 +766,7 @@ def main(args):
         }
         
         print(f"Final Results:")
+        print(f"Angular Error: {final_results['angular_err']:.4f}")
         print(f"Acc@1: {final_results['final_acc1']:.4f}")
         print(f"Acc@5: {final_results['final_acc5']:.4f}")
         print(f"UAR: {final_results['final_uar']:.4f}")
@@ -675,6 +774,18 @@ def main(args):
         print(f"Weighted F1: {final_results['final_weighted_f1']:.4f}")
         print(f"Micro F1: {final_results['final_micro_f1']:.4f}")
         print(f"Macro F1: {final_results['final_macro_f1']:.4f}")
+        
+        # Log final results to wandb/tensorboard
+        if log_writer is not None:
+            log_writer.update(head='final', **final_results)
+            
+            # Log confusion matrix if available in detailed stats
+            if 'predictions' in detailed_stats and 'targets' in detailed_stats:
+                log_writer.log_confusion_matrix(
+                    y_true=detailed_stats['targets'],
+                    y_pred=detailed_stats['predictions'],
+                    step=epoch
+                )
         
         # Save to log file
         if cfg.SYSTEM.OUTPUT_DIR:
@@ -684,6 +795,10 @@ def main(args):
             with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
                 f.write("=== FINAL RESULTS ===\n")
                 f.write(json.dumps(final_results, indent=2) + "\n")
+    
+    # Finish wandb logging
+    if log_writer is not None:
+        log_writer.finish()
     
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

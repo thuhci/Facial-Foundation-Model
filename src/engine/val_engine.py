@@ -11,6 +11,8 @@ from src.utils.config import get_cfg
 from src.optim.mixup import Mixup
 from timm.utils import ModelEma, accuracy
 from src import utils
+from src.utils.gaze import gaze3d_to_gaze2d, compute_angular_error
+import os
 
 
 
@@ -22,6 +24,43 @@ class ValidationEngine:
     def __init__(self, model: nn.Module, device: torch.device):
         self.model = model
         self.device = device
+        
+    
+    @torch.no_grad()
+    def _process_batch(self, batch_data: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Process batch data and apply mixup if needed."""
+        samples, targets, _ = batch_data
+        samples = samples.to(self.device, non_blocking=True)
+        targets = targets.to(self.device, non_blocking=True)
+        
+        cfg = get_cfg()
+        # print(f"[DEBUG] samples shape: {samples.shape}, targets shape: {targets.shape}")
+        # print(f"[DEBUG] cfg.MODEL.KEEP_TEMPORAL_DIM: {cfg.MODEL.KEEP_TEMPORAL_DIM}")
+        if cfg.MODEL.KEEP_TEMPORAL_DIM:
+            if targets.dim() == 3:
+                pass
+            elif targets.dim() == 2:
+                raise ValueError("KEEP_TEMPORAL_DIM requires 5D dataset")
+        elif targets.dim() == 3:
+            # print("[DEBUG] targets shape before squeeze:", targets.shape)
+            targets = targets[:,-1,:]
+        
+        # Ensure correct data types
+        if cfg.DATA.TASK == 'regression':
+            targets = targets.float()  # Regression task
+        elif cfg.DATA.TASK == 'classification':
+            targets = targets.long()   # Classification task
+        elif cfg.DATA.TASK == 'combine':
+            cls_tar = targets[..., 0].long()  # First column for classification
+            reg_tar = targets[..., 1:].float()  # All but first column for regression
+            targets = {
+                "cls": cls_tar,
+                "reg": reg_tar
+            }
+        else:
+            raise ValueError(f"Unknown task: {cfg.DATA.TASK}")
+            
+        return samples, targets
     
     @torch.no_grad()
     def validate(self, data_loader: DataLoader) -> Dict[str, float]:
@@ -45,8 +84,10 @@ class ValidationEngine:
         
         for batch in metric_logger.log_every(data_loader, 10, header):
             videos, targets = batch[0], batch[1]
-            videos = videos.to(self.device, non_blocking=True)
-            targets = targets.to(self.device, non_blocking=True)
+            # videos = videos.to(self.device, non_blocking=True)
+            # targets = targets.to(self.device, non_blocking=True)
+            
+            videos, targets = self._process_batch(batch)
             
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
@@ -64,16 +105,43 @@ class ValidationEngine:
                     #     acc5 = torch.tensor(0.0)  # Placeholder
                     # else:
                     #     # Standard gaze regression
-                    if targets.dim() == 2 and targets.size(1) == 3:
+                    if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
-                        target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 3)  # Ensure correct shape
+                        targets = utils.gaze.gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                     else:
-                        target_angles = targets
-                    # target_angles = utils.gaze.gaze3d_to_gaze2d(targets)
-                    loss = criterion(output, target_angles)
-                    angular_error = utils.gaze.compute_angular_error(output, target_angles)
+                        targets = targets.reshape(-1, 2)  # Ensure correct shape
+                    output = output.reshape(-1, 2)  # Ensure outputs are also 2D angles
+                    # targets = utils.gaze.gaze3d_to_gaze2d(targets)
+                    # print("[DEBUG] targets shape:", targets.shape, "output shape:", output.shape)
+                    # print("[DEBUG] targets:", targets, "output:", output)
+                    loss = criterion(output, targets)
+                    # print("[DEBUG] loss:", loss.item())
+                    angular_error = utils.gaze.compute_angular_error(output, targets)
+                    # print("[DEBUG] angular_error:", angular_error.item())
                     acc1 = torch.tensor(0.0)  # Placeholder
                     acc5 = torch.tensor(0.0)  # Placeholder
+                elif cfg.DATA.TASK == 'combine':
+                    # Combined classification and regression task
+                    cls_tar = targets["cls"].long().flatten()
+                    reg_tar = targets["reg"]
+                    cls_pred = output['cls'].reshape(-1, cfg.DATA.NUM_CLASSES_CLS)
+                    reg_pred = output['reg']
+
+                    # Compute losses
+                    cls_loss = criterion['cls_criterion'](cls_pred, cls_tar)
+                    reg_loss = criterion['reg_criterion'](reg_pred, reg_tar)
+                    loss = cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss
+                    
+                    # Compute metrics
+                    acc1, acc5 = accuracy(cls_pred, cls_tar, topk=(1, 5))
+                    angular_error = utils.gaze.compute_angular_error(reg_pred, reg_tar)
+                    
+                    # Collect predictions for combine task
+                    cls_predictions = cls_pred.argmax(dim=1)
+                    all_predictions.extend(cls_predictions.cpu().numpy())
+                    all_targets.extend(cls_tar.cpu().numpy())
                 else:
                     # Classification task
                     loss = criterion(output, targets)
@@ -86,7 +154,7 @@ class ValidationEngine:
                     all_targets.extend(targets.cpu().numpy())
             
             # Update metrics
-            if cfg.DATA.TASK == 'regression' :
+            if cfg.DATA.TASK == 'regression' or cfg.DATA.TASK == 'combine':
                 total_angular_error += angular_error * videos.shape[0]
                 num_samples += videos.shape[0]
             
@@ -98,9 +166,12 @@ class ValidationEngine:
         
         # Compute UAR, WAR and F1 scores for classification tasks
         uar, war, weighted_f1, micro_f1, macro_f1 = 0.0, 0.0, 0.0, 0.0, 0.0
-        if cfg.DATA.TASK != 'regression' and len(all_predictions) > 0:
+        if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score
             conf_mat = confusion_matrix(y_true=all_targets, y_pred=all_predictions)
+            # if (conf_mat.sum(axis=1) == 0).any():
+            #     class_acc = None  # Avoid division by zero
+            # else:
             class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
             uar = np.mean(class_acc)  # Unweighted Average Recall
             war = conf_mat.trace() / conf_mat.sum()  # Weighted Average Recall (same as overall accuracy)
@@ -116,10 +187,15 @@ class ValidationEngine:
             metric_logger.meters['macro_f1'].update(macro_f1, n=len(all_predictions))
         
         # Compute final metrics
-        if cfg.DATA.TASK == 'regression' and num_samples > 0:
+        if (cfg.DATA.TASK == 'regression' or cfg.DATA.TASK == 'combine') and num_samples > 0:
             mean_angular_error = total_angular_error / num_samples
             metric_logger.meters['mean_angle_error'].update(mean_angular_error, n=num_samples)
-            print(f'* Mean Angular Error {mean_angular_error:.4f}° loss {metric_logger.loss.global_avg:.6f}')
+            if cfg.DATA.TASK == 'regression':
+                print(f'* Mean Angular Error {mean_angular_error:.4f}° loss {metric_logger.loss.global_avg:.6f}')
+            else:  # combine task
+                print(f'* Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f} Angular Error {mean_angular_error:.4f}° loss {metric_logger.loss.global_avg:.6f}')
+                if len(all_predictions) > 0:
+                    print(f'* UAR {uar:.4f} WAR {war:.4f} Weighted F1 {weighted_f1:.4f} Micro F1 {micro_f1:.4f} Macro F1 {macro_f1:.4f}')
         else:
             print(f'* Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f} loss {metric_logger.loss.global_avg:.3f}')
             if len(all_predictions) > 0:
@@ -137,6 +213,12 @@ class ValidationEngine:
                 return utils.gaze.l2cs_criterion
             else:
                 return torch.nn.MSELoss()
+        elif cfg.DATA.TASK == 'combine':
+            # Combined task uses multiple criteria
+            return {
+                'cls_criterion': torch.nn.CrossEntropyLoss(),
+                'reg_criterion': torch.nn.MSELoss()
+            }
         else:
             return torch.nn.CrossEntropyLoss()
     
@@ -157,8 +239,7 @@ class ValidationEngine:
         
         for batch_idx, batch in enumerate(data_loader):
             videos, targets = batch[0], batch[1]
-            videos = videos.to(self.device, non_blocking=True)
-            targets = targets.to(self.device, non_blocking=True)
+            videos, targets = self._process_batch(batch)
             
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
@@ -168,8 +249,22 @@ class ValidationEngine:
                     all_predictions.extend(predictions.cpu().numpy())
                     all_targets.extend(targets.cpu().numpy())
                     all_outputs.extend(output.cpu().numpy())
+                elif cfg.DATA.TASK == 'combine':
+                    # For combine task, use classification predictions
+                    cls_pred = output['cls']
+                    cls_tar = targets["cls"]
+                    predictions = cls_pred.argmax(dim=1)
+                    all_predictions.extend(predictions.cpu().numpy())
+                    all_targets.extend(cls_tar.cpu().numpy())
+                    all_outputs.extend(cls_pred.cpu().numpy())
+                else:
+                    # Classification task
+                    predictions = output.argmax(dim=1)
+                    all_predictions.extend(predictions.cpu().numpy())
+                    all_targets.extend(targets.cpu().numpy())
+                    all_outputs.extend(output.cpu().numpy())
 
-        if cfg.DATA.TASK == 'regression' and len(all_predictions) > 0:
+        if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score, classification_report
             import pandas as pd
             
@@ -212,7 +307,7 @@ class ValidationEngine:
             print(f"Macro F1: {macro_f1:.4f}")
             
             # Save predictions to CSV if output directory exists
-            if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+            if cfg.SYSTEM.OUTPUT_DIR and utils.utils.is_main_process():
                 pred_df = pd.DataFrame({
                     'target': all_targets,
                     'prediction': all_predictions

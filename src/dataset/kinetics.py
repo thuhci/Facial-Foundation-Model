@@ -1,6 +1,7 @@
 import os
 import numpy as np
 # from numpy.lib.function_base import disp # not in thieversion
+import pandas as pd
 
 import torch
 import decord
@@ -645,210 +646,304 @@ class VideoReaderFrame:
         return [self.pil_loader(self.frames[idx]) for idx in idxs]
 
 
-class VideoReaderGaze360:
-    """Specialized video reader for Gaze360 dataset with sequential frame prediction"""
-    def __init__(self, base_frame, file_ext='jpg', clip_len=16):
-        self.base_frame = base_frame.split('/')[-1].split('.')[0]  # get the base frame name without extension
-        self.base_frame = int(self.base_frame)  # convert to integer if it's a number
-        # print(f"==> Note: VideoReaderGaze360 initialized with base_frame: {self.base_frame}, file_ext: {file_ext}, clip_len: {clip_len}")
-        # self.video_dir = base_frame.split('/')[:-1]
-        # self.video_dir = os.path.join(*self.video_dir)  # join path components
-        self.video_dir = os.path.dirname(base_frame)  # get the directory of the base frame
-        # print(f"==> Note: VideoReaderGaze360 video_dir: {self.video_dir}")
-        self.file_ext = file_ext
-        self.clip_len = clip_len
-        self.frames = sorted(glob.glob(os.path.join(self.video_dir, f'*.{file_ext}')))
 
-
-    def pil_loader(self, path):
-        with open(path, "rb") as f:
-            img = Image.open(f)
-            return img.convert("RGB")
-
-    def load_clip(self):
-       
-        # end_idx = self.frames.index(self.base_frame)
-        # return_frames = []
-        # for i in range(end_idx, self.clip_len):
-        #     return_frames.append(self.frames[0])
-        # for i in range(max(0, end_idx - self.clip_len + 1), end_idx + 1):
-        #     return_frames.append(self.frames[i])
-        lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
-        return_frames = []
-        # print(f"==> Note[0]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
-        while os.path.exists(lst_available_frame) and len(return_frames) < self.clip_len:
-            # append from front
-            return_frames.append(lst_available_frame)
-            self.base_frame -= 1
-            lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
-        # print(f"==> Note[1]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
-        if len(return_frames) < self.clip_len:
-            # append from back
-            self.base_frame += 1
-            lst_available_frame = os.path.join(self.video_dir, f'{self.base_frame:06d}.{self.file_ext}')
-        # print(f"==> Note[2]: Loading clip from {lst_available_frame} with clip_len {self.clip_len}")
-        while len(return_frames) < self.clip_len:
-            return_frames.append(lst_available_frame)
-            
-        # reverse the order to match the original sequence
-        return_frames.reverse()
-        
-        # print(f"Loading clip from {self.base_frame} with length {self.clip_len} from {self.video_dir}")
-        # print(f"end_idx: {self.base_frame}, clip_len: {self.clip_len}, frames: {self.frames}")
-        # print(f"return_frames: {return_frames}")
-        # print(f"return_frames: {len(return_frames)}")
-            
-        
-        return [self.pil_loader(frame) for frame in return_frames]
-
-
-class VideoRegDatasetGaze360(VideoClsDatasetFrame):
-    """Specialized dataset for Gaze360 sequential frame prediction"""
+class VideoRegDatasetFrame(Dataset):
+    """
+    Dataset for regression tasks with frame-based data from multiple CSV files.
+    
+    Args:
+        anno_path: Path to folder containing multiple CSV files
+        data_path: Root path for image data
+        mode: 'train', 'validation', or 'test'
+        clip_len: Number of consecutive frames to load
+        frame_sample_rate: Sampling rate for frames within a clip (1=consecutive, 2=every other frame)
+        crop_size: Size for cropping images
+        short_side_size: Size for resizing shorter side
+        file_ext: Image file extension (e.g., 'jpg', 'png')
+        task: Task type ('regression' for time-dependent labels)
+        clip_stride: Interval between consecutive clip starting positions
+    """
     
     def __init__(self, anno_path, data_path, mode='train', clip_len=16,
                  frame_sample_rate=1, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3, 
-                 file_ext='jpg', predict_last_frame=True):
-        # Initialize parent class with regression task
-        super().__init__(
-            anno_path=anno_path, data_path=data_path, mode=mode, clip_len=clip_len,
-            frame_sample_rate=frame_sample_rate, crop_size=crop_size, short_side_size=short_side_size,
-            new_height=new_height, new_width=new_width, keep_aspect_ratio=keep_aspect_ratio,
-            num_segment=num_segment, num_crop=num_crop, test_num_segment=test_num_segment, 
-            test_num_crop=test_num_crop, file_ext=file_ext, task='gaze_regression'
-        )
-        self.predict_last_frame = predict_last_frame
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,
+                 file_ext='jpg', task='regression', clip_stride=1):
+        self.anno_path = anno_path
+        self.data_path = data_path
+        self.mode = mode
+        self.clip_len = clip_len
+        self.frame_sample_rate = frame_sample_rate
+        self.crop_size = crop_size
+        self.short_side_size = short_side_size
+        self.new_height = new_height
+        self.new_width = new_width
+        self.keep_aspect_ratio = keep_aspect_ratio
+        self.num_segment = num_segment
+        self.test_num_segment = test_num_segment
+        self.num_crop = num_crop
+        self.test_num_crop = test_num_crop
+        self.file_ext = file_ext
+        self.task = task
+        self.clip_stride = clip_stride  # New parameter for clip interval
 
-    def load_video(self, sample, sample_rate_scale=1):
-        """Load sequential frames for Gaze360"""
-        fname = sample
-        
-        if not os.path.exists(fname):
-            print(f"file does not exist: {fname}")
-            return []
-        
-        # Directory case - load sequential frames
-        try:
-            vr = VideoReaderGaze360(fname, file_ext=self.file_ext, clip_len=self.clip_len)
+        self.aug = False
+        self.rand_erase = False
+        if self.mode in ['train']:
+            self.aug = True
+            cfg = get_cfg()
+            if cfg.AUGMENTATION.RANDOM_ERASE_PROB > 0:
+                self.rand_erase = True
 
-            buffer = vr.load_clip()
-                
-            # if self.mode == 'train':
-            #     # Random sampling for training
-            #     start_idx = np.random.randint(0, max(1, len(vr)))
-            #     buffer = vr.load_clip(start_idx)
-            # else:
-            #     # Use middle clip for validation/test
-            #     start_idx = len(vr) // 2 if len(vr) > 0 else 0
-            #     buffer = vr.load_clip(start_idx)
-                
-                
-            return buffer
+        # Load all CSV files from the folder
+        self.csv_files = []
+        self.csv_data = []
+        self.valid_clips = []  # Store (csv_idx, start_idx) for valid clips
+        
+        if os.path.isdir(anno_path):
+            csv_files = sorted(glob.glob(os.path.join(anno_path, '*.csv')))
+            print(f"Found {len(csv_files)} CSV files in {anno_path}")
             
-        except Exception as e:
-            print(f"Error loading Gaze360 video from {fname}: {e}")
-            return []
+            for csv_idx, csv_file in enumerate(csv_files):
+                try:
+                    # Read CSV file
+                    df = pd.read_csv(csv_file, header=None, delimiter=' ')
+                    # Check if we have enough frames considering frame_sample_rate
+                    converted_len = int(self.clip_len * self.frame_sample_rate)
+                    if len(df) < converted_len:
+                        print(f"Skipping {csv_file}: only {len(df)} rows, need at least {converted_len} for clip_len={self.clip_len} and frame_sample_rate={self.frame_sample_rate}")
+                        continue
+                    
+                    self.csv_files.append(csv_file)
+                    
+                    # Store image paths and labels
+                    image_paths = list(df.values[:, 0])
+                    labels = df.values[:, 1:].astype(np.float32)  # Convert to float32 directly
+                    
+                    self.csv_data.append({
+                        'image_paths': image_paths,
+                        'labels': labels,
+                        'length': len(image_paths)
+                    })
+                    
+                    # Generate valid clip starting positions for this CSV
+                    # Use clip_stride for determining interval between clips
+                    max_start_idx = len(image_paths) - converted_len + 1
+                    for start_idx in range(0, max_start_idx, self.clip_stride):
+                        self.valid_clips.append((csv_idx, start_idx))
+                        
+                except Exception as e:
+                    print(f"Error loading {csv_file}: {e}")
+                    continue
+        else:
+            raise ValueError(f"anno_path {anno_path} is not a directory")
+
+        print(f"Loaded {len(self.csv_files)} CSV files with {len(self.valid_clips)} valid clips")
+
+        # Setup data transforms
+        if mode == 'train':
+            self.data_resize = video_transforms.Compose([
+                video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
+            ])
+        elif mode == 'validation':
+            self.data_transform = video_transforms.Compose([
+                video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
+                video_transforms.Resize(size=(self.crop_size, self.crop_size), interpolation='bilinear'),
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+            ])
+        elif mode == 'test':
+            self.data_resize = video_transforms.Compose([
+                video_transforms.Resize(size=(self.short_side_size), interpolation='bilinear')
+            ])
+            self.data_transform = video_transforms.Compose([
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+            ])
+
+    def __len__(self):
+        return len(self.valid_clips)
+
+    def load_frame_sequence(self, csv_idx, start_idx):
+        """Load a sequence of frames and labels from a CSV file"""
+        csv_data = self.csv_data[csv_idx]
+        
+        # Calculate the actual number of frames needed considering sample rate
+        # Similar to VideoClsDataset's converted_len calculation
+        converted_len = int(self.clip_len * self.frame_sample_rate)
+        
+        # Get frame indices with sampling rate (similar to VideoClsDataset)
+        frame_indices = list(range(start_idx, start_idx + converted_len, self.frame_sample_rate))
+        
+        # Ensure we don't exceed the available frames
+        max_frame_idx = len(csv_data['image_paths']) - 1
+        frame_indices = [min(idx, max_frame_idx) for idx in frame_indices]
+        
+        # Take only the required number of frames
+        frame_indices = frame_indices[:self.clip_len]
+        
+        # Pad if necessary (repeat last frame)
+        while len(frame_indices) < self.clip_len:
+            frame_indices.append(frame_indices[-1] if frame_indices else start_idx)
+        
+        # Load images
+        frames = []
+        for idx in frame_indices:
+            img_path = csv_data['image_paths'][idx]
+            # Make absolute path if needed
+            if not os.path.isabs(img_path):
+                img_path = os.path.join(self.data_path, img_path)
+            
+            try:
+                with open(img_path, "rb") as f:
+                    img = Image.open(f)
+                    frames.append(img.convert("RGB"))
+            except Exception as e:
+                print(f"Error loading image {img_path}: {e}")
+                # Use a black image as placeholder
+                frames.append(Image.new('RGB', (224, 224), color='black'))
+        
+        # Load labels (with time dimension for regression)
+        labels = []
+        for idx in frame_indices:
+            label = csv_data['labels'][idx]
+            labels.append(label)
+        
+        # Convert to tensor and ensure proper shape
+        labels = np.array(labels)  # Shape: [T, num_labels]
+        labels = torch.from_numpy(labels).float()
+        
+        return frames, labels
+
+    def _aug_frame(self, buffer):
+        """Apply data augmentation to frame sequence"""
+        cfg = get_cfg()
+
+        aug_transform = video_transforms.create_random_augment(
+            input_size=(self.crop_size, self.crop_size),
+            auto_augment=cfg.AUGMENTATION.AUTO_AUGMENT,
+            interpolation=cfg.AUGMENTATION.TRAIN_INTERPOLATION,
+        )
+
+        buffer = aug_transform(buffer)
+        buffer = [transforms.ToTensor()(img) for img in buffer]
+        buffer = torch.stack(buffer)  # T C H W
+        buffer = buffer.permute(0, 2, 3, 1)  # T H W C
+
+        # Normalize
+        buffer = tensor_normalize(
+            buffer, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        )
+        # T H W C -> C T H W
+        buffer = buffer.permute(3, 0, 1, 2)
+
+        # Spatial sampling
+        scl, asp = ([0.8, 1.0], [0.75, 1.3333])
+        
+        buffer = spatial_sampling(
+            buffer,
+            spatial_idx=-1,
+            min_scale=256,
+            max_scale=320,
+            crop_size=self.crop_size,
+            random_horizontal_flip=False if self.task == 'regression' else True,
+            inverse_uniform_sampling=False,
+            aspect_ratio=asp,
+            scale=scl,
+            motion_shift=False
+        )
+
+        if self.rand_erase:
+            erase_transform = RandomErasing(
+                cfg.AUGMENTATION.RANDOM_ERASE_PROB,
+                mode=cfg.AUGMENTATION.RANDOM_ERASE_MODE,
+                max_count=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
+                num_splits=cfg.AUGMENTATION.RANDOM_ERASE_COUNT,
+                device="cpu",
+            )
+            buffer = buffer.permute(1, 0, 2, 3)
+            buffer = erase_transform(buffer)
+            buffer = buffer.permute(1, 0, 2, 3)
+
+        return buffer
 
     def __getitem__(self, index):
         cfg = get_cfg()
+        csv_idx, start_idx = self.valid_clips[index]
+        
         if self.mode == 'train':
-
-            sample = self.dataset_samples[index]
-            # print(f"Loading training sample {index}: {sample}")
-            
             try:
-                buffer = self.load_video(sample, sample_rate_scale=1)
+                frames, labels = self.load_frame_sequence(csv_idx, start_idx)
             except Exception as e:
-                print(f"Error loading video {sample}: {e}")
+                print(f"Error loading sequence at index {index}: {e}")
                 # Return a random sample instead
                 index = np.random.randint(self.__len__())
                 return self.__getitem__(index)
-                
-            if len(buffer) == 0:
-                # Return a random sample instead
+            
+            if len(frames) == 0:
                 index = np.random.randint(self.__len__())
                 return self.__getitem__(index)
 
             # Apply resize transformation
-            # print(f"Loaded {len(buffer)} frames for sample {sample}")
-            buffer = self.data_resize(buffer)
-            
-            # # debug 
-            # import matplotlib.pyplot as plt
-            # show_img = np.array(buffer[-1])
-            # show_lbl = self.label_array[index]
-            # show_name = sample
-            # plt.imshow(show_img)
-            # # plt.text(0, 0, f"Label: {show_lbl}, Name: {show_name}", color='black', fontsize=12)
-            # plt.title(f"Label: {show_lbl}, Name: {show_name}")
-            # plt.axis('off')
-            # # plt.show()
-            # plt.savefig(f"debug/debug_{index}.png", bbox_inches='tight', pad_inches=0.1)
-            # [checked, correct, BUT NOT NORMALIZED], done in _aug_frame
-            
-            # print(f"After resizing, buffer length: {len(buffer)}")
+            frames = self.data_resize(frames)
             
             # Apply data augmentation
-            
-            # print("[DEBUG] in get ittem" )
-            
             if cfg.AUGMENTATION.NUM_SAMPLE > 1:
+                # print("DEBUG: Using data augmentation with multiple samples")
                 frame_list = []
                 label_list = []
                 index_list = []
                 for _ in range(cfg.AUGMENTATION.NUM_SAMPLE):
-                    new_frames = self._aug_frame(buffer)
-                    label = self.label_array[index]
+                    new_frames = self._aug_frame(frames)
                     frame_list.append(new_frames)
-                    label_list.append(label)
+                    label_list.append(labels)
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer)
+                frames = self._aug_frame(frames)
+                
+            # Convert labels to tensor if it's still numpy
+            if isinstance(labels, np.ndarray):
+                labels = torch.from_numpy(labels).float()
+            
+            # print("[DEBUG] shape of frames after augmentation:", frames.shape)
+            # print("[DEBUG] shape of labels:", labels.shape)
+            # print("[DEBUG] index:", index)
 
-            # Return 16 frames with last frame's gaze angles
-            return buffer, self.label_array[index], index, {}
+            return frames, labels, index, {}
 
         elif self.mode == 'validation':
-            sample = self.dataset_samples[index]
-            buffer = self.load_video(sample)
+            frames, labels = self.load_frame_sequence(csv_idx, start_idx)
             
-            # [DEBUG]: not use first frames:
-            # if (buffer[0] == buffer[1]):
-            #     print(f"Warning: First two frames are identical for validation sample {sample}")
-            #     index = np.random.randint(self.__len__())
-            #     return self.__getitem__(index)
-            
-            if len(buffer) == 0:
-                print(f"Warning: Empty buffer for validation sample {sample}")
-                # Create dummy data
+            if len(frames) == 0:
+                print(f"Warning: Empty frames for validation sample at index {index}")
                 dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
-                buffer = [dummy_img] * self.clip_len
+                frames = [dummy_img] * self.clip_len
+                labels = torch.zeros((self.clip_len, 1))  # Dummy labels
                 
-            buffer = self.data_transform(buffer)
-            return buffer, self.label_array[index], sample
+            frames = self.data_transform(frames)
+            return frames, labels, f"csv_{csv_idx}_start_{start_idx}"
 
         elif self.mode == 'test':
-            sample = self.test_dataset[index]
-            chunk_nb, split_nb = self.test_seg[index]
-            buffer = self.load_video(sample)
+            frames, labels = self.load_frame_sequence(csv_idx, start_idx)
 
-            if len(buffer) == 0:
-                print(f"Warning: Empty buffer for test sample {sample}")
+            if len(frames) == 0:
+                print(f"Warning: Empty frames for test sample at index {index}")
                 dummy_img = Image.new('RGB', (self.crop_size, self.crop_size), color='black')
-                buffer = [dummy_img] * self.clip_len
+                frames = [dummy_img] * self.clip_len
+                labels = torch.zeros((self.clip_len, 1))  # Dummy labels
 
-            buffer = self.data_resize(buffer)
-            if isinstance(buffer, list):
-                buffer = np.stack(buffer, 0)
+            frames = self.data_resize(frames)
+            if isinstance(frames, list):
+                frames = np.stack(frames, 0)
 
-            # For Gaze360, we don't need temporal and spatial cropping like action recognition
-            # Just apply the standard transform
-            buffer = self.data_transform(buffer)
-            return buffer, self.test_label_array[index], sample, chunk_nb, split_nb
+            frames = self.data_transform(frames)
+            return frames, labels, f"csv_{csv_idx}_start_{start_idx}", 0, 0
         else:
             raise NameError('mode {} unknown'.format(self.mode))
+
 
 
 class VideoReaderEVE:
@@ -935,8 +1030,12 @@ class VideoReaderEVE:
             # Convert to PIL images
             pil_frames = [Image.fromarray(frame) for frame in frames]
             
+            cfg = get_cfg()
             # Load corresponding labels
-            labels = self.load_h5_labels([end_frame_idx])  # Only get label for last frame
+            if not cfg.MODEL.KEEP_TEMPORAL_DIM:
+                labels = self.load_h5_labels([end_frame_idx])  # Only get label for last frame
+            else:
+                labels = self.load_h5_labels(frame_indices)
             
             return pil_frames, labels
             
@@ -1033,13 +1132,24 @@ class VideoRegDatasetEVE(VideoClsDatasetFrame):
             if labels and len(labels) > 0:
                 # Example: use combined gaze direction as target
                 # You may need to adjust this based on your specific needs
-                if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
-                    left_gaze = labels['left_g_tobii'][-1]  # Last frame
-                    right_gaze = labels['right_g_tobii'][-1]
-                    # Average left and right gaze
-                    target_label = (left_gaze + right_gaze) / 2.0
-                elif 'PoG_px_tobii' in labels:
-                    target_label = labels['PoG_px_tobii'][-1]  # Last frame PoG
+                cfg = get_cfg()
+                if cfg.MODEL.KEEP_TEMPORAL_DIM:
+                    # Use all frames' labels
+                    if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
+                        left_gaze = labels['left_g_tobii']
+                        right_gaze = labels['right_g_tobii']
+                        # Average left and right gaze
+                        target_label = (left_gaze + right_gaze) / 2.0
+                    elif 'PoG_px_tobii' in labels:
+                        target_label = labels['PoG_px_tobii']
+                else:
+                    if 'left_g_tobii' in labels and 'right_g_tobii' in labels:
+                        left_gaze = labels['left_g_tobii'][-1]  # Last frame
+                        right_gaze = labels['right_g_tobii'][-1]
+                        # Average left and right gaze
+                        target_label = (left_gaze + right_gaze) / 2.0
+                    elif 'PoG_px_tobii' in labels:
+                        target_label = labels['PoG_px_tobii'][-1]  # Last frame PoG
                     
             return frames, target_label
             

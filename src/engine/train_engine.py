@@ -81,6 +81,7 @@ class TrainingEngine:
             
             # Forward pass
             loss, output = self._forward_pass(samples, targets)
+            # print(f"[DEBUG] Loss: {loss.item()}, Output shape: {output.shape}, Targets shape: {targets.shape}")
             
             # Check for invalid loss
             if not math.isfinite(loss.item()):
@@ -123,25 +124,46 @@ class TrainingEngine:
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
     
-    def _process_batch(self, batch_data: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _process_batch(self, batch_data: Tuple):
         """Process batch data and apply mixup if needed."""
         samples, targets, _, _ = batch_data
         samples = samples.to(self.device, non_blocking=True)
         targets = targets.to(self.device, non_blocking=True)
         
+        cfg = self.cfg
+        # print(f"[DEBUG] samples shape: {samples.shape}, targets shape: {targets.shape}")
+        # print(f"[DEBUG] cfg.MODEL.KEEP_TEMPORAL_DIM: {cfg.MODEL.KEEP_TEMPORAL_DIM}")
+        if cfg.MODEL.KEEP_TEMPORAL_DIM:
+            if targets.dim() == 3:
+                pass
+            elif targets.dim() == 2:
+                raise ValueError("KEEP_TEMPORAL_DIM requires 5D dataset")
+        elif targets.dim() == 3:
+            # print("[DEBUG] targets shape before squeeze:", targets.shape)
+            targets = targets[:,-1,:]
+        
         # Ensure correct data types
         if self.cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
-        else:
+        elif self.cfg.DATA.TASK == 'classification':
             targets = targets.long()   # Classification task
-        
+        elif self.cfg.DATA.TASK == 'combine':
+            cls_tar = targets[..., 0].long()  # First column for classification
+            reg_tar = targets[..., 1:].float()  # All but first column for regression
+            targets = {
+                "cls": cls_tar,
+                "reg": reg_tar
+            }
+        else:
+            raise ValueError(f"Unknown task: {self.cfg.DATA.TASK}")
+
         # Apply mixup if enabled
         if self.mixup_fn is not None:
             samples, targets = self.mixup_fn(samples, targets)
             
         return samples, targets
     
-    def _forward_pass(self, samples: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_pass(self, samples: torch.Tensor, targets) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass with task-specific handling."""
         if self.loss_scaler is None:
             # DeepSpeed mode
@@ -152,36 +174,49 @@ class TrainingEngine:
             with torch.cuda.amp.autocast():
                 return self._forward_task_specific(samples, targets)
     
-    def _forward_task_specific(self, samples: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_task_specific(self, samples: torch.Tensor, targets) -> Tuple[torch.Tensor, torch.Tensor]:
         """Task-specific forward pass."""
         outputs = self.model(samples)
         
-        if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
-            raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
+        # if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
+        #     raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
         
         if self.cfg.DATA.TASK == 'regression':
-            if self.cfg.DATA.DATASET_NAME == 'Gaze360':
-                if self.cfg.GAZE.USE_L2CS:
-                    # L2CS mode
-                    if isinstance(outputs, dict):
-                        total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
-                        return total_loss, outputs
-                    else:
-                        raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
+            if self.cfg.DATA.DATASET_NAME == 'Gaze360' and self.cfg.GAZE.USE_L2CS:
+                if isinstance(outputs, dict):
+                    total_loss, ce_loss, mse_loss, angular_error = self.criterion(outputs, targets, self.cfg)
+                    return total_loss, outputs
                 else:
-                    # Standard gaze regression
-                    target_angles = gaze3d_to_gaze2d(targets)
-                    loss = self.criterion(outputs, target_angles)
-                    return loss, outputs
+                    raise ValueError("L2CS mode requires model to output dict with 'pitch' and 'yaw' keys")
             else:
-                # Standard regression task
+                # Standard gaze regression
+                if targets.shape[-1] == 3:
+                    targets = targets.reshape(-1, 3)  # Ensure correct shape
+                    targets = gaze3d_to_gaze2d(targets)
+                    targets = targets.reshape(-1, 2)
+                targets = targets.reshape(-1, 2)  # Reshape to 2D angles
+                outputs = outputs.reshape(-1, 2)  # Ensure outputs are also 2D angles
+                # print(f"[DEBUG] outputs shape: {outputs.shape}, targets shape: {targets.shape}")
+                # print(f"[DEBUG] example outputs: {outputs[0:5]}, example targets: {targets[0:5]}")
                 loss = self.criterion(outputs, targets)
                 return loss, outputs
+        elif self.cfg.DATA.TASK == 'combine':
+            cls_tar = targets["cls"].long().flatten()
+            reg_tar = targets["reg"]
+            cls_pred = outputs['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
+            reg_pred = outputs['reg']
+            # print("cls_tar.shape", cls_tar.shape, "reg_tar.shape", reg_tar.shape)
+            # print("cls_pred.shape", cls_pred.shape, "reg_pred.shape", reg_pred.shape)
+            cls_loss = self.criterion['cls_criterion'](cls_pred, cls_tar)
+            reg_loss = self.criterion['reg_criterion'](reg_pred, reg_tar) 
+            loss = self.cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss
+            return loss, outputs
+        
         else:
             # Classification task
             # print("example outputs", outputs[0:5])
             # print("example targets", targets[0:5])
-            
+            # print("[DEBUG] output shape", outputs.shape, "targets shape:", targets.shape)
             loss = self.criterion(outputs, targets)
             return loss, outputs
     
@@ -230,7 +265,7 @@ class TrainingEngine:
         return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
     
     def _update_metrics(self, metric_logger, loss: torch.Tensor, output: torch.Tensor, 
-                        targets: torch.Tensor, grad_norm: Optional[float]):
+                        targets , grad_norm: Optional[float]):
         """Update training metrics."""
         loss_value = loss.item()
         loss_scale_value = self._get_loss_scale_for_deepspeed() if self.loss_scaler is None else self.loss_scaler.state_dict()["scale"]
@@ -244,14 +279,26 @@ class TrainingEngine:
                 #     class_acc = 0.0  # Placeholder
                 # else:
                     # Standard regression mode
-                if targets.dim() == 2 and targets.size(1) == 3:
+                if targets.shape[-1] == 3:
                     # 3D gaze vector
-                    target_angles = gaze3d_to_gaze2d(targets)
+                    targets = targets.reshape(-1, 3)
+                    targets = gaze3d_to_gaze2d(targets)
+                    targets = targets.reshape(-1, 2)
                 else:
-                    target_angles = targets
-                angular_error = compute_angular_error(output, target_angles)
-                class_acc = angular_error
+                    targets = targets.reshape(-1, 2)  # Ensure correct shape
+                # print(f"[DEBUG] targets shape after processing: {targets.shape}, shape of output: {output.shape}")
+                angular_error = compute_angular_error(output, targets)
+                class_acc = None
                 metric_logger.update(angular_error=angular_error)
+            elif self.cfg.DATA.TASK == 'combine':
+                cls_tar = targets["cls"]
+                reg_tar = targets["reg"]
+                cls_pred = output['cls']
+                reg_pred = output["reg"]
+                class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
+                angular_error = compute_angular_error(reg_pred, reg_tar)
+                metric_logger.update(angular_error=angular_error)
+
             else:
                 # Classification task
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
@@ -282,7 +329,7 @@ class TrainingEngine:
         metric_logger.update(grad_norm=grad_norm)
     
     def _log_metrics(self, loss: torch.Tensor, output: torch.Tensor, 
-                     targets: torch.Tensor, grad_norm: Optional[float]):
+                     targets , grad_norm: Optional[float]):
         """Log metrics to tensorboard."""
         if self.log_writer is None:
             return
@@ -293,14 +340,24 @@ class TrainingEngine:
         if self.mixup_fn is None:
             if self.cfg.DATA.TASK == 'regression':
                 if not self.cfg.GAZE.USE_L2CS:
-                    if targets.dim() == 2 and targets.size(1) == 3:
+                    if targets.shape[-1] == 3:  # Check if targets are 3D gaze vectors
                         # 3D gaze vector
-                        target_angles = gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 3)  # Ensure correct shape
+                        targets = gaze3d_to_gaze2d(targets)
+                        targets = targets.reshape(-1, 2)  # Reshape to 2D angles
                     else:
-                        target_angles = targets
-                    angular_error = compute_angular_error(output, target_angles)
+                        targets = targets.reshape(-1, 2)  # Ensure correct shape
+                    angular_error = compute_angular_error(output, targets)
                     self.log_writer.update(angular_error=angular_error, head="loss")
                 class_acc = 0.0  # Placeholder for gaze
+            elif self.cfg.DATA.TASK == 'combine':
+                cls_tar = targets["cls"]
+                reg_tar = targets["reg"]
+                cls_pred = output['cls']
+                reg_pred = output["reg"]
+                class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
+                angular_error = compute_angular_error(reg_pred, reg_tar)
+                self.log_writer.update(angular_error=angular_error, head="loss")
             else:
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
                 self.log_writer.update(class_acc=class_acc, head="loss")

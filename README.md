@@ -48,6 +48,20 @@ dependencies:
 * `opencv-python=4.7.0.72`
 * `tensorboardX=2.6.1`
 
+### Mamba installation:
+- Clone the VideoMamba repo:
+  ```shell
+  git clone https://github.com/OpenGVLab/VideoMamba.git
+  ```
+- Install its dependencies:
+  ```shell
+  cd VideoMamba
+  pip install -r requirements.txt
+  pip install -e causal-conv1d
+  pip install -e mamba
+  ```
+
+
 
 ### ➡️ Data Preparation
 
@@ -159,6 +173,80 @@ Not available yet.
 1. Download the Gaze 360 dataset from [Gaze 360](https://gaze360.csail.mit.edu/) to the current folder.
 2. Run the [preprocess/data_prepocessing_gaze360.py](./preprocess/data_processing_gaze360.py) script to normalize the dataset and labels.
 3. Run the [preprocess/preprocess_gaze360.py](./preprocess/gaze360.py) to align the dataset labels, which will be generated to `saved/data/gaze360/`.
+
+## Relabel the Emotion datasets With Gaze
+
+For a emotion dataset, we need $4$ steps to relabel it to a dataset with gaze.
+
+### Step One
+Transfer the csvs from videos representation to frames representation. i.e, 
+
+Original csv is like, an example is [dfew_224](saved/data/dfew_224/org/split01/test.csv) 
+```
+dataset_root/video_1  label_1
+dataset_root/video_2  label_2
+...
+```
+
+After step one, it should be
+```
+dataset_root/video_1/00001  label_1
+dataset_root/video_1/00002  label_1
+...
+dataset_root/video_2/00001  label_2
+...
+```
+
+
+### Step Two
+Split the whole csv into several csvs by their video, you can check [this script](./preprocess/split_to_folders.py)
+
+After step two, it should be like [gaze360T](saved/data/gaze360T)
+
+```
+- test
+----- test_00000_0.csv
+-------- dataset_root/video_1/00001  label_1
+-------- dataset_root/video_1/00002  label_1
+-------- ...
+----- test_00000_1.csv
+-------- dataset_root/video_1/00101  label_1
+-------- dataset_root/video_1/00102  label_1
+-------- ...
+...
+- train
+...
+```
+
+### Step Three
+Run [relbl_with_gaze.py](relbl_with_gaze.py) to relabel the emotion datasets with gaze information, you should check the paths in the file, and then get a csv like:
+
+```
+dataset_root/video_1  label_1 pitch yaw
+dataset_root/video_2  label_2 pitch yaw
+...
+```
+### Step Four
+Repeat step two to split this csv into several ones by video. A final example is [dfew_combine](saved/data/dfew_combine/split01).
+
+
+## Run relabeled Training
+
+```
+python run_finetuning_with_yacs.py --config configs/dfew_combine.yaml --output_dir output/dfew_combine/
+```
+
+You should note these configs:
+```
+data:
+  num_classes_cls: 7 # Number of classes for classification
+  num_dim_reg: 2 # Number of dimensions for regression
+
+training:
+  combine_loss_alpha : 0.0  # Weight for classification loss in combined loss
+```
+
+
 
 ### Script
 ```bash
