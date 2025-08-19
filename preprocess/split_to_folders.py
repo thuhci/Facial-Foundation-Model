@@ -1,13 +1,25 @@
 import os
 import argparse
 import pandas as pd
+import numpy as np
 
 #################################################################
 #      modify this output_root                                  #
 #################################################################
 
-output_root = '/home/qzk/Facial-Foundation-Model/saved/data/mafw_combine/split01'
+output_root = '/home/qzk/Facial-Foundation-Model/saved/data/gaze360T_combine'
 
+
+def GazeTo2d(gaze):
+    yaw = np.arctan2(gaze[0], -gaze[2])
+    pitch = np.arcsin(gaze[1])
+    return np.array([pitch, yaw])
+
+def GazeTo3d(gaze):
+    x = np.cos(gaze[0]) * np.sin(gaze[1])
+    y = np.sin(gaze[0])
+    z = -np.cos(gaze[0]) * np.cos(gaze[1])
+    return np.array([x, y, z])
     
 def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
     # remove all files in the output directory
@@ -20,13 +32,14 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
                 os.rmdir(os.path.join(root, name))
     else:
         os.makedirs(output_root)
-    for split in ["train", "test"]:
+    for split in ["train", "test", "val"]:
+        print("processing split", split)
     # for split in ["test"]:
     
         #################################################################
         #      modify this txt_path to your original csv / txt          #
         #################################################################
-        txt_path = f"/home/qzk/Facial-Foundation-Model/outputs/relabeled_mafw_{split}.csv"
+        txt_path = f"/home/qzk/Facial-Foundation-Model/saved/data/gaze360/{split}.csv"
         out_path = f"{output_root}/{split}"
         if not os.path.exists(out_path):
             os.makedirs(out_path)
@@ -45,19 +58,25 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
                 #      modify here to get proper rec_name & frame_name          #
                 #################################################################
                 
-                rec_name = line.split('/')[6]
-                frame_name = int(line.split('/')[7].split('.')[0])
+                rec_name = int(line.split('/')[5].split("_")[-1])
+                per_name =  int(line.split('/')[7])
+                frame_name = int(line.split('/')[8].split('.')[0])
                 # frame_name = line.split('/')[9].split('.')[0]
-                lbl = line.split('/')[7].split(' ')[1:]
+                lbl = line.split('/')[8].split(' ')[1:]
+                # print("rec_name", rec_name, "per_name", per_name, "frame_name", frame_name, "lbl", lbl)
+                lbl = [float(x) for x in lbl]
+                lbl = GazeTo2d(lbl)
 
-                print("rec_name", rec_name, "frame_name", frame_name, "lbl", lbl)
+                line = line.split(' ')[0] + " 0 " + str(lbl[0]) + ' ' + str(lbl[1])
+
+                # print("rec_name", rec_name, "per_name", per_name, "frame_name", frame_name, "lbl", lbl)
                 
-                print("line: ", line)
+                # print("line: ", line)
                 
-                txt_lines.append((line, rec_name, frame_name, lbl))
+                txt_lines.append((line, rec_name, per_name, frame_name, lbl))
 
         # sort by rec_name, vid_name, frame_name
-        txt_lines.sort(key=lambda x: (x[1], x[2]))
+        txt_lines.sort(key=lambda x: (x[1], x[2], x[3]))
         lst = 0
         files = []
 
@@ -65,9 +84,10 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         for i in range(1, len(txt_lines)):
             txt_line = txt_lines[i]
             lst_line = txt_lines[i-1]
-            if txt_line[1] == lst_line[1] and txt_line[2] <= lst_line[2] + gap_threshold:
+            # if txt_line[1] == lst_line[1] and txt_line[2] <= lst_line[2] + gap_threshold:
+            if txt_line[1] == lst_line[1] and txt_line[2] == lst_line[2] and txt_line[3] <= lst_line[3] + gap_threshold:
                 # curr_file.append(txt_line)
-                for j in range(int(txt_line[2]) - int(lst_line[2])):
+                for j in range(int(txt_line[3]) - int(lst_line[3])):
                     curr_file.append(txt_line)
                 continue
             lst = i
@@ -92,7 +112,7 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
             df.to_csv(csv_path, header=None, index=False)
             
         if not save_discarded:
-            return
+            continue
             
         for i, file in enumerate(discarded_files):
             out_lines = [line[0] for line in file]

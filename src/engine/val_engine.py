@@ -48,7 +48,7 @@ class ValidationEngine:
         # Ensure correct data types
         if cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
-        elif cfg.DATA.TASK == 'class':
+        elif cfg.DATA.TASK == 'classification':
             targets = targets.long()   # Classification task
         elif cfg.DATA.TASK == 'combine':
             cls_tar = targets[..., 0].long()  # First column for classification
@@ -124,15 +124,15 @@ class ValidationEngine:
                     acc5 = torch.tensor(0.0)  # Placeholder
                 elif cfg.DATA.TASK == 'combine':
                     # Combined classification and regression task
-                    cls_tar = targets["cls"]
+                    cls_tar = targets["cls"].long().flatten()
                     reg_tar = targets["reg"]
-                    cls_pred = output['cls']
+                    cls_pred = output['cls'].reshape(-1, cfg.DATA.NUM_CLASSES_CLS)
                     reg_pred = output['reg']
-                    
+
                     # Compute losses
                     cls_loss = criterion['cls_criterion'](cls_pred, cls_tar)
                     reg_loss = criterion['reg_criterion'](reg_pred, reg_tar)
-                    loss = cls_loss + reg_loss
+                    loss = cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss
                     
                     # Compute metrics
                     acc1, acc5 = accuracy(cls_pred, cls_tar, topk=(1, 5))
@@ -166,10 +166,13 @@ class ValidationEngine:
         
         # Compute UAR, WAR and F1 scores for classification tasks
         uar, war, weighted_f1, micro_f1, macro_f1 = 0.0, 0.0, 0.0, 0.0, 0.0
-        if (cfg.DATA.TASK == 'class' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
+        if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score
             conf_mat = confusion_matrix(y_true=all_targets, y_pred=all_predictions)
-            class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
+            if (conf_mat.sum(axis=1) == 0).any():
+                class_acc = None  # Avoid division by zero
+            else:
+                class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
             uar = np.mean(class_acc)  # Unweighted Average Recall
             war = conf_mat.trace() / conf_mat.sum()  # Weighted Average Recall (same as overall accuracy)
             weighted_f1 = f1_score(y_true=all_targets, y_pred=all_predictions, average='weighted')
@@ -261,7 +264,7 @@ class ValidationEngine:
                     all_targets.extend(targets.cpu().numpy())
                     all_outputs.extend(output.cpu().numpy())
 
-        if (cfg.DATA.TASK == 'class' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
+        if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score, classification_report
             import pandas as pd
             

@@ -11,7 +11,9 @@ model:
   use_mean_pooling: True
   # depth: 16
 
-  keep_temporal_dim: True 
+  keep_temporal_dim: True  # Keep temporal dimension for gaze estimation
+
+  use_enhanced_patch_embed: False  # Use enhanced patch embedding for better performance
   
   # Attention configuration
   attn_type: local_global
@@ -25,23 +27,23 @@ model:
   lg_no_third: false
 
 data:
-  dataset_name: DFEW_combine
-  data_path: /home/qzk/Facial-Foundation-Model/saved/data/dfew_combine/split01
+  dataset_name: Gaze360T_combine7
+  data_path: saved/data/gaze360T_combine
   eval_data_path: null
+  task: combine
   num_classes: 7
   num_classes_cls: 7
   num_dim_reg: 2
   num_segments: 1
   num_frames: 16
   sampling_rate: 1
+  clip_stride: 1
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 16
+  batch_size: 8
   num_workers: 20
   pin_memory: true
-
-  task: combine
 
 augmentation:
   # Basic augmentation
@@ -50,7 +52,6 @@ augmentation:
   num_sample: 1  # Disabled for gaze estimation
   
   # Auto augmentation (disabled for gaze)
-  # auto_augment: null
   auto_augment: rand-m7-n4-mstd0.5-inc0
   
   # Mixup augmentation (disabled for gaze estimation)
@@ -75,7 +76,6 @@ optimization:
   lr: 0.001
   min_lr: 0.000001
   warmup_lr: 0.000001
-  # warmup_lr: 0.001
   weight_decay: 0.05
   weight_decay_end: null
   
@@ -96,8 +96,7 @@ training:
   epochs: 50
   start_epoch: 0
   update_freq: 1
-  save_ckpt_freq: 10
-  combine_loss_alpha : 1.0  # Weight for classification loss in combined loss
+  save_ckpt_freq: 1
   
   # Model EMA
   model_ema: false
@@ -114,8 +113,7 @@ training:
   auto_resume: true
   resume: ''
   finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
-  # finetune: null
-
+  
   # Validation metric
   val_metric: acc1
 
@@ -129,7 +127,7 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/mafw_finetune_yaml_config
+  output_dir: ./output/gaze360_finetune_yaml_config
   log_dir: null
   
   # Distributed training
@@ -137,11 +135,13 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: true  # 启用分布式训练
-  backend: nccl
+  distributed: true  # 不启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false
   
   # Features
   save_feature: false
+
+# wandb:
+#   use_wandb: true

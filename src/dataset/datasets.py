@@ -95,7 +95,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -156,7 +156,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -187,7 +187,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -219,7 +219,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -250,7 +250,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -281,7 +281,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -313,7 +313,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -345,7 +345,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -377,7 +377,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -409,7 +409,8 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
+            clip_stride=cfg.DATA.CLIP_STRIDE,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -420,7 +421,9 @@ def build_dataset(is_train, test_mode):
         )
         nb_classes = 2
 
-    elif cfg.DATA.DATASET_NAME == 'DFEW_combine':
+    
+        
+    elif cfg.DATA.DATASET_NAME == 'Gaze360T_combine7' or cfg.DATA.DATASET_NAME == 'DFEW_combine':
         mode = None
         anno_path = None
         if is_train is True:
@@ -440,7 +443,8 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
+            clip_stride=cfg.DATA.CLIP_STRIDE,  # New parameter for clip interval
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -451,7 +455,7 @@ def build_dataset(is_train, test_mode):
         )
         nb_classes = 7
         
-    elif cfg.DATA.DATASET_NAME == 'MAFW_combine':
+    elif cfg.DATA.DATASET_NAME == 'Gaze360T_combine11' or cfg.DATA.DATASET_NAME == 'MAFW_combine':
         mode = None
         anno_path = None
         if is_train is True:
@@ -471,7 +475,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            clip_stride=cfg.DATA.CLIP_STRIDE,  # New parameter for clip interval
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,
@@ -502,7 +506,7 @@ def build_dataset(is_train, test_mode):
             mode=mode,
             clip_len=cfg.DATA.NUM_FRAMES,
             frame_sample_rate=cfg.DATA.SAMPLING_RATE,
-            num_segment=1,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
             test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
             test_num_crop=cfg.DATA.TEST_NUM_CROP,
             num_crop=1 if not test_mode else 3,

@@ -145,7 +145,7 @@ class TrainingEngine:
         # Ensure correct data types
         if self.cfg.DATA.TASK == 'regression':
             targets = targets.float()  # Regression task
-        elif self.cfg.DATA.TASK == 'class':
+        elif self.cfg.DATA.TASK == 'classification':
             targets = targets.long()   # Classification task
         elif self.cfg.DATA.TASK == 'combine':
             cls_tar = targets[..., 0].long()  # First column for classification
@@ -201,10 +201,12 @@ class TrainingEngine:
                 loss = self.criterion(outputs, targets)
                 return loss, outputs
         elif self.cfg.DATA.TASK == 'combine':
-            cls_tar = targets["cls"]
+            cls_tar = targets["cls"].long().flatten()
             reg_tar = targets["reg"]
-            cls_pred = outputs['cls']
+            cls_pred = outputs['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
             reg_pred = outputs['reg']
+            # print("cls_tar.shape", cls_tar.shape, "reg_tar.shape", reg_tar.shape)
+            # print("cls_pred.shape", cls_pred.shape, "reg_pred.shape", reg_pred.shape)
             cls_loss = self.criterion['cls_criterion'](cls_pred, cls_tar)
             reg_loss = self.criterion['reg_criterion'](reg_pred, reg_tar) 
             loss = self.cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss

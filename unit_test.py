@@ -63,6 +63,9 @@ class UnitTester:
             'configs/gaze360T.yaml',
             'configs/dfew_finetune.yaml',
             'configs/eve_finetune.yaml',  # Add more if needed
+            'configs/dfew_combine.yaml',
+            'configs/gaze360T_combine.yaml',
+            'configs/mafw_combine.yaml',
         ]
         
         self.pretrain_configs = [

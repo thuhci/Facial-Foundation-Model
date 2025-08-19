@@ -656,18 +656,19 @@ class VideoRegDatasetFrame(Dataset):
         data_path: Root path for image data
         mode: 'train', 'validation', or 'test'
         clip_len: Number of consecutive frames to load
-        frame_sample_rate: Sampling rate for frames (default 1 means consecutive frames)
+        frame_sample_rate: Sampling rate for frames within a clip (1=consecutive, 2=every other frame)
         crop_size: Size for cropping images
         short_side_size: Size for resizing shorter side
         file_ext: Image file extension (e.g., 'jpg', 'png')
         task: Task type ('regression' for time-dependent labels)
+        clip_stride: Interval between consecutive clip starting positions
     """
     
     def __init__(self, anno_path, data_path, mode='train', clip_len=16,
                  frame_sample_rate=1, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
                  num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,
-                 file_ext='jpg', task='regression'):
+                 file_ext='jpg', task='regression', clip_stride=1):
         self.anno_path = anno_path
         self.data_path = data_path
         self.mode = mode
@@ -684,6 +685,7 @@ class VideoRegDatasetFrame(Dataset):
         self.test_num_crop = test_num_crop
         self.file_ext = file_ext
         self.task = task
+        self.clip_stride = clip_stride  # New parameter for clip interval
 
         self.aug = False
         self.rand_erase = False
@@ -706,8 +708,10 @@ class VideoRegDatasetFrame(Dataset):
                 try:
                     # Read CSV file
                     df = pd.read_csv(csv_file, header=None, delimiter=' ')
-                    if len(df) < self.clip_len:
-                        print(f"Skipping {csv_file}: only {len(df)} rows, need at least {self.clip_len}")
+                    # Check if we have enough frames considering frame_sample_rate
+                    converted_len = int(self.clip_len * self.frame_sample_rate)
+                    if len(df) < converted_len:
+                        print(f"Skipping {csv_file}: only {len(df)} rows, need at least {converted_len} for clip_len={self.clip_len} and frame_sample_rate={self.frame_sample_rate}")
                         continue
                     
                     self.csv_files.append(csv_file)
@@ -723,8 +727,9 @@ class VideoRegDatasetFrame(Dataset):
                     })
                     
                     # Generate valid clip starting positions for this CSV
-                    max_start_idx = len(image_paths) - self.clip_len + 1
-                    for start_idx in range(0, max_start_idx, self.frame_sample_rate):
+                    # Use clip_stride for determining interval between clips
+                    max_start_idx = len(image_paths) - converted_len + 1
+                    for start_idx in range(0, max_start_idx, self.clip_stride):
                         self.valid_clips.append((csv_idx, start_idx))
                         
                 except Exception as e:
@@ -765,8 +770,23 @@ class VideoRegDatasetFrame(Dataset):
         """Load a sequence of frames and labels from a CSV file"""
         csv_data = self.csv_data[csv_idx]
         
-        # Get consecutive frame indices
-        frame_indices = list(range(start_idx, start_idx + self.clip_len))
+        # Calculate the actual number of frames needed considering sample rate
+        # Similar to VideoClsDataset's converted_len calculation
+        converted_len = int(self.clip_len * self.frame_sample_rate)
+        
+        # Get frame indices with sampling rate (similar to VideoClsDataset)
+        frame_indices = list(range(start_idx, start_idx + converted_len, self.frame_sample_rate))
+        
+        # Ensure we don't exceed the available frames
+        max_frame_idx = len(csv_data['image_paths']) - 1
+        frame_indices = [min(idx, max_frame_idx) for idx in frame_indices]
+        
+        # Take only the required number of frames
+        frame_indices = frame_indices[:self.clip_len]
+        
+        # Pad if necessary (repeat last frame)
+        while len(frame_indices) < self.clip_len:
+            frame_indices.append(frame_indices[-1] if frame_indices else start_idx)
         
         # Load images
         frames = []

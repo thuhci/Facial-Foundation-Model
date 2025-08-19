@@ -474,7 +474,7 @@ def rand_augment_ops(magnitude=10, hparams=None, transforms=None):
     hparams = hparams or _HPARAMS_DEFAULT
     transforms = transforms or _RAND_TRANSFORMS
     cfg = get_cfg()
-    if cfg.DATA.TASK == "regression":
+    if cfg.DATA.TASK != "classification":
         transforms = _RAND_TRANSFORMS_FOR_REGRESSION
     # print("[DEBUG TRANSFORMS] transforms:", transforms)
     return [
