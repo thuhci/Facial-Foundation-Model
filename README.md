@@ -34,19 +34,12 @@ Extensive experiments on *six* DFER datasets show that our MAE-DFER *consistentl
 
 ### 🔨 Installation
 
-dependencies:
+The environment is tested with both python 3.8 and python 3.10.
 
-* `Python 3.8`
-* `PyTorch 1.7.1 (cuda 10.2)`
-* `timm==0.4.12`
-* `einops==0.6.1`
-* `decord==0.6.0`
-* `scikit-learn=1.1.3`
-* `scipy=1.10.1`
-* `pandas==1.5.3`
-* `numpy=1.23.4`
-* `opencv-python=4.7.0.72`
-* `tensorboardX=2.6.1`
+```
+conda create -n <your_env_name> python=3.10
+pip install -r requirement.txt
+```
 
 ### Mamba installation:
 - Clone the VideoMamba repo:
@@ -56,7 +49,6 @@ dependencies:
 - Install its dependencies:
   ```shell
   cd VideoMamba
-  pip install -r requirements.txt
   pip install -e causal-conv1d
   pip install -e mamba
   ```
