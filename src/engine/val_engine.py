@@ -169,10 +169,10 @@ class ValidationEngine:
         if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score
             conf_mat = confusion_matrix(y_true=all_targets, y_pred=all_predictions)
-            if (conf_mat.sum(axis=1) == 0).any():
-                class_acc = None  # Avoid division by zero
-            else:
-                class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
+            # if (conf_mat.sum(axis=1) == 0).any():
+            #     class_acc = None  # Avoid division by zero
+            # else:
+            class_acc = conf_mat.diagonal() / conf_mat.sum(axis=1)
             uar = np.mean(class_acc)  # Unweighted Average Recall
             war = conf_mat.trace() / conf_mat.sum()  # Weighted Average Recall (same as overall accuracy)
             weighted_f1 = f1_score(y_true=all_targets, y_pred=all_predictions, average='weighted')
