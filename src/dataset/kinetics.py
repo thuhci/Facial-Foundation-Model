@@ -799,6 +799,10 @@ class VideoRegDatasetFrame(Dataset):
             try:
                 with open(img_path, "rb") as f:
                     img = Image.open(f)
+                    cfg = get_cfg()
+                    # if cfg.DATA.DATASET_NAME == "GazeCapture":
+                    #     frames.append(img.convert("BGR"))
+                    # else:
                     frames.append(img.convert("RGB"))
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")

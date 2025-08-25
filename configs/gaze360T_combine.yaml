@@ -27,17 +27,17 @@ model:
   lg_no_third: false
 
 data:
-  dataset_name: Gaze360T_combine7
+  dataset_name: Gaze360T_combine11
   data_path: saved/data/gaze360T_combine
   eval_data_path: null
   task: combine
-  num_classes: 7
-  num_classes_cls: 7
+  num_classes: 11
+  num_classes_cls: 11
   num_dim_reg: 2
   num_segments: 1
   num_frames: 16
   sampling_rate: 1
-  clip_stride: 1
+  clip_stride: 16
   imagenet_default_mean_and_std: true
   
   # Data loading

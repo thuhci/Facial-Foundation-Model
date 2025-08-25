@@ -423,7 +423,7 @@ def build_dataset(is_train, test_mode):
 
     
         
-    elif cfg.DATA.DATASET_NAME == 'Gaze360T_combine7' or cfg.DATA.DATASET_NAME == 'DFEW_combine':
+    elif cfg.DATA.DATASET_NAME == 'Gaze360T_combine7' or cfg.DATA.DATASET_NAME == 'DFEW_combine' or cfg.DATA.DATASET_NAME == 'GazeCapture_combine7':
         mode = None
         anno_path = None
         if is_train is True:
