@@ -14,6 +14,7 @@ from src import utils
 from src.utils.gaze import gaze3d_to_gaze2d, compute_angular_error
 import os
 
+import cv2
 
 
 class ValidationEngine:
@@ -24,6 +25,7 @@ class ValidationEngine:
     def __init__(self, model: nn.Module, device: torch.device):
         self.model = model
         self.device = device
+        self.flag = False
         
     
     @torch.no_grad()
@@ -88,6 +90,12 @@ class ValidationEngine:
             # targets = targets.to(self.device, non_blocking=True)
             
             videos, targets = self._process_batch(batch)
+            # print("[DEBUG] videos", videos)
+            if not self.flag:
+                img_to_show = videos[0,:,0,...].permute(1,2,0).cpu().numpy()
+                # print("[DEBUG] img_to_show", img_to_show)
+                # cv2.imwrite("debug.jpg", (img_to_show*255).astype(np.uint8))
+                self.flag = True
             
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
@@ -125,9 +133,9 @@ class ValidationEngine:
                 elif cfg.DATA.TASK == 'combine':
                     # Combined classification and regression task
                     cls_tar = targets["cls"].long().flatten()
-                    reg_tar = targets["reg"]
+                    reg_tar = targets["reg"].reshape(-1, 2)
                     cls_pred = output['cls'].reshape(-1, cfg.DATA.NUM_CLASSES_CLS)
-                    reg_pred = output['reg']
+                    reg_pred = output['reg'].reshape(-1, 2)
 
                     # Compute losses
                     cls_loss = criterion['cls_criterion'](cls_pred, cls_tar)
@@ -137,9 +145,10 @@ class ValidationEngine:
                     # Compute metrics
                     acc1, acc5 = accuracy(cls_pred, cls_tar, topk=(1, 5))
                     angular_error = utils.gaze.compute_angular_error(reg_pred, reg_tar)
+                    # print("[DEBUG] angular err", angular_error)
                     
                     # Collect predictions for combine task
-                    cls_predictions = cls_pred.argmax(dim=1)
+                    cls_predictions = cls_pred.argmax(dim=-1)
                     all_predictions.extend(cls_predictions.cpu().numpy())
                     all_targets.extend(cls_tar.cpu().numpy())
                 else:
@@ -149,7 +158,7 @@ class ValidationEngine:
                     acc1, acc5 = accuracy(output, targets, topk=(1, 5))
                     
                     # Collect predictions and targets for UAR/WAR calculation
-                    predictions = output.argmax(dim=1)
+                    predictions = output.argmax(dim=-1)
                     all_predictions.extend(predictions.cpu().numpy())
                     all_targets.extend(targets.cpu().numpy())
             
@@ -164,6 +173,7 @@ class ValidationEngine:
             metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
             metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         
+            # exit(0)
         # Compute UAR, WAR and F1 scores for classification tasks
         uar, war, weighted_f1, micro_f1, macro_f1 = 0.0, 0.0, 0.0, 0.0, 0.0
         if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:

@@ -6,7 +6,7 @@ import torch.nn as nn
 
 def spherical_to_cartesian(spherical_coords):
     """将球坐标转换为笛卡尔坐标"""
-    spherical_coords = nn.functional.normalize(spherical_coords)
+    # spherical_coords = nn.functional.normalize(spherical_coords)
     pitch = spherical_coords[..., 0]  # 俯仰角
     yaw = spherical_coords[..., 1]    # 偏航角
     
@@ -19,6 +19,7 @@ def spherical_to_cartesian(spherical_coords):
 
 def cartesian_to_spherical(cartesian_coords):
     """将笛卡尔坐标转换为球坐标"""
+    cartesian_coords = nn.functional.normalize(cartesian_coords)
     x = cartesian_coords[..., 0]
     y = cartesian_coords[..., 1]
     z = cartesian_coords[..., 2]
