@@ -202,9 +202,9 @@ class TrainingEngine:
                 return loss, outputs
         elif self.cfg.DATA.TASK == 'combine':
             cls_tar = targets["cls"].long().flatten()
-            reg_tar = targets["reg"]
+            reg_tar = targets["reg"].reshape(-1, 2)
             cls_pred = outputs['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
-            reg_pred = outputs['reg']
+            reg_pred = outputs['reg'].reshape(-1, 2)
             # print("cls_tar.shape", cls_tar.shape, "reg_tar.shape", reg_tar.shape)
             # print("cls_pred.shape", cls_pred.shape, "reg_pred.shape", reg_pred.shape)
             cls_loss = self.criterion['cls_criterion'](cls_pred, cls_tar)
@@ -291,10 +291,10 @@ class TrainingEngine:
                 class_acc = None
                 metric_logger.update(angular_error=angular_error)
             elif self.cfg.DATA.TASK == 'combine':
-                cls_tar = targets["cls"]
-                reg_tar = targets["reg"]
-                cls_pred = output['cls']
-                reg_pred = output["reg"]
+                cls_tar = targets["cls"].flatten()
+                reg_tar = targets["reg"].reshape(-1, 2)
+                cls_pred = output['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
+                reg_pred = output["reg"].reshape(-1, 2)
                 class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
                 angular_error = compute_angular_error(reg_pred, reg_tar)
                 metric_logger.update(angular_error=angular_error)
@@ -351,10 +351,10 @@ class TrainingEngine:
                     self.log_writer.update(angular_error=angular_error, head="loss")
                 class_acc = 0.0  # Placeholder for gaze
             elif self.cfg.DATA.TASK == 'combine':
-                cls_tar = targets["cls"]
-                reg_tar = targets["reg"]
-                cls_pred = output['cls']
-                reg_pred = output["reg"]
+                cls_tar = targets["cls"].flatten()
+                reg_tar = targets["reg"].reshape(-1, 2)
+                cls_pred = output['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
+                reg_pred = output["reg"].reshape(-1, 2)
                 class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
                 angular_error = compute_angular_error(reg_pred, reg_tar)
                 self.log_writer.update(angular_error=angular_error, head="loss")

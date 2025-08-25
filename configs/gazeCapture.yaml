@@ -34,11 +34,12 @@ data:
   num_classes: 2
   num_segments: 1
   num_frames: 16
-  sampling_rate: 4
+  clip_stride: 16
+  sampling_rate: 1
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 48
+  batch_size: 8
   num_workers: 20
   pin_memory: true
 

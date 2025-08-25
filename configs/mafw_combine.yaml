@@ -39,7 +39,7 @@ data:
   
   # Data loading
   batch_size: 32
-  num_workers: 10
+  num_workers: 20
   pin_memory: true
 
   task: combine
@@ -98,7 +98,7 @@ training:
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 10
-  combine_loss_alpha : 0.0  # Weight for classification loss in combined loss
+  combine_loss_alpha : 10.0  # Weight for classification loss in combined loss
   
   # Model EMA
   model_ema: false

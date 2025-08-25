@@ -28,13 +28,14 @@ model:
 
 data:
   dataset_name: Gaze360
-  data_path: saved/data/gaze360T_phi
+  data_path: saved/data/gaze360T
   eval_data_path: null
   task: regression
   num_classes: 2
   num_segments: 1
   num_frames: 16
-  sampling_rate: 4
+  clip_stride: 1
+  sampling_rate: 1
   imagenet_default_mean_and_std: true
   
   # Data loading
