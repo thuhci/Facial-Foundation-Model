@@ -17,7 +17,25 @@ from timm.utils import ModelEma
 from src import utils
 from src.utils.gaze import gaze3d_to_gaze2d, compute_angular_error
 
-
+def check_gradient_status(model):
+    """Check if trainable parameters are receiving gradients after a backward pass.
+    Call this function after loss.backward() to verify gradient updates."""
+    print("\nChecking gradient status for trainable parameters:")
+    missing_grads = []
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.grad is None:
+                missing_grads.append(name)
+                print(f"  WARNING: {name} has no gradient (not updated)!")
+            else:
+                print(f"  {name}: Gradient norm = {param.grad.norm().item()}")
+    
+    # if missing_grads:
+    #     print(f"\nWARNING: {len(missing_grads)} trainable parameters did not receive gradients:")
+    #     for name in missing_grads:
+    #         print(f"  - {name}")
+    # else:
+    #     print("All trainable parameters received gradients.")
 class TrainingEngine:
     """
     Clean training engine that encapsulates training logic.
@@ -90,7 +108,7 @@ class TrainingEngine:
             
             # Backward pass
             grad_norm = self._backward_pass(loss, data_iter_step)
-            
+            # check_gradient_status(self.model)
             # Update metrics
             self._update_metrics(metric_logger, loss, output, targets, grad_norm)
             
@@ -177,6 +195,7 @@ class TrainingEngine:
     def _forward_task_specific(self, samples: torch.Tensor, targets) -> Tuple[torch.Tensor, torch.Tensor]:
         """Task-specific forward pass."""
         outputs = self.model(samples)
+        # print(attns)
         
         # if self.cfg.MODEL.KEEP_TEMPORAL_DIM:
         #     raise NotImplementedError("Keep temporal dimension not implemented for LOSS")
@@ -246,7 +265,8 @@ class TrainingEngine:
                 clip_grad=self.cfg.OPTIMIZATION.CLIP_GRAD,
                 parameters=self.model.parameters(), 
                 create_graph=is_second_order,
-                update_grad=(data_iter_step + 1) % self.cfg.TRAINING.UPDATE_FREQ == 0
+                update_grad=(data_iter_step + 1) % self.cfg.TRAINING.UPDATE_FREQ == 0,
+                model=self.model
             )
             
             if (data_iter_step + 1) % self.cfg.TRAINING.UPDATE_FREQ == 0:
@@ -255,8 +275,9 @@ class TrainingEngine:
                     self.model_ema.update(self.model)
                     
             loss_scale_value = self.loss_scaler.state_dict()["scale"]
-        
         torch.cuda.synchronize()
+        # check_gradient_status(self.model)
+        # print(grad_norm)
         return grad_norm
     
     def _get_loss_scale_for_deepspeed(self) -> float:

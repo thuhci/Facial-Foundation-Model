@@ -150,6 +150,14 @@ class VisionTransformer(nn.Module):
         self.head.weight.data.mul_(init_scale)
         self.head.bias.data.mul_(init_scale)
 
+        # self.shortcut_patch_conv = nn.Sequential(
+        #     nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv3d(32, 1, kernel_size=(16, 4, 4), stride=(16, 4, 4), padding=(0,0,0)) if not self.keep_temporal_dim else nn.Conv3d(32, 1, kernel_size=3, stride=(1, 4, 4), padding=1),
+        #     nn.Linear(400, 512)  # MLP 将 [20, 20] = 400 转换为 512
+        # )
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -177,10 +185,26 @@ class VisionTransformer(nn.Module):
         # print("==> in VisionTransformer forward_features")
         # print("shape of x before patch embedding:", x.shape)
         # x: (B, C, T, H, W)
+        # shortcut = x
+        B, C, T, H, W = x.shape
         x = self.patch_embed(x)
         # x: (B, num_patches, embed_dim)
         # print("shape of x after patch embedding:", x.shape)
-        B, _, _ = x.size()
+
+        # add shortcut (32, 3, 16, 160, 160)
+        # shortcut = shortcut.permute(0, 2, 1, 3, 4).contiguous() # (32, 16, 3, 160, 160)
+        # shortcut = shortcut.view(-1, C, H, W) # (32*16, 3, 160, 160)
+        # shortcut = self.shortcut_patch_conv[0](shortcut) # (32*16, 32, 80, 80)
+        # shortcut = self.shortcut_patch_conv[1](shortcut) # batchnorm
+        # shortcut = self.shortcut_patch_conv[2](shortcut) # relu
+        # shortcut = shortcut.view(B, T, 32, 80, 80) # (32, 16, 32, 80, 80)
+        # shortcut = shortcut.permute(0, 2, 1, 3, 4) # (32, 32, 16, 80, 80)
+        # shortcut = self.shortcut_patch_conv[3](shortcut) # (32, 1, 16, 20, 20)
+        # if not self.keep_temporal_dim:
+        #     shortcut = shortcut.view(B, -1) # (32, 400)
+        # else: 
+        #     shortcut = shortcut.view(B, T, -1) # (32, 16, 400)
+        # shortcut = self.shortcut_patch_conv[4](shortcut) # (32, 16, 512) / (32, 512)
 
         if self.pos_embed is not None:
             # print("shape of pos_embed:", self.pos_embed.shape)
@@ -188,7 +212,7 @@ class VisionTransformer(nn.Module):
             # pos_embed: (1, num_patches, embed_dim)
             x = x + self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
         x = self.pos_drop(x)
-
+        all_attns = []
         if self.attn_type == 'local_global':
             # print("==> Local-Global attention mode")
             # input: region partition
@@ -208,10 +232,10 @@ class VisionTransformer(nn.Module):
             # print("shape of x after rearrange for blocks:", x.shape)
             # run through each block
             for i, blk in enumerate(self.blocks):
-                x = blk(x, b) # (b*n, s, c), stays the same shape
+                x, attns = blk(x, b) # (b*n, s, c), stays the same shape
+                # print(attns[0].shape)
                 # print(f"shape of x after block {i}:", x.shape)
-                
-            
+                all_attns.append(attns)
 
             x = rearrange(x, '(b n) s c -> b n s c', b=b) # s = 1 + thw
             
@@ -288,6 +312,8 @@ class VisionTransformer(nn.Module):
                     "cls": self.head['cls'](x)
                 }
             
+        # x = x + shortcut  # (B, embed_dim)
+        x = self.decoder(x) if hasattr(self, 'decoder') else x
         x = self.head(x)
         # me: add head activation function support
         x = self.head_activation_func(x)

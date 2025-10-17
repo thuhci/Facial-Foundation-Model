@@ -6,6 +6,74 @@ import torch.nn.functional as F
 from timm.models.layers import drop_path, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 from einops import rearrange, repeat
+from src.utils.config import get_cfg
+
+class LoRALayer(nn.Module):
+    def __init__(self, in_features, out_features, rank=8, scale=16):
+        super().__init__()
+        self.rank = rank
+        self.scale = scale
+        # print(in_features, out_features, rank, alpha)
+        self.lora_A = nn.Parameter(torch.zeros(self.rank, in_features))
+        self.lora_B = nn.Parameter(torch.zeros(out_features, self.rank))
+        # self.lora_dropout = nn.Dropout(p=0.02)
+        nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+        nn.init.zeros_(self.lora_B)
+
+    def forward(self, x, original_weight):
+        lora_weight = (self.lora_B @ self.lora_A) * self.scale
+        return F.linear(x, original_weight + lora_weight)
+        # return F.linear(x, lora_weight)
+
+class DoRALayer(nn.Module):
+    def __init__(self, in_features, out_features, rank=16, alpha=1.0):
+        super().__init__()
+        self.rank = 8
+        self.alpha = alpha
+        # 低秩矩阵 A 和 B，与 LoRA 一致
+        self.lora_A = nn.Parameter(torch.zeros(self.rank, in_features))
+        self.lora_B = nn.Parameter(torch.zeros(out_features, self.rank))
+        # 初始化方式与原 LoRA 保持一致
+        nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+        nn.init.zeros_(self.lora_B)
+        # 幅度参数 m，初始化为全 1，形状为 (out_features, 1)
+        self.m = nn.Parameter(torch.ones(out_features, 1))
+        # 原 LoRA 的 scale 参数在 DoRA 中不再需要，改为由 m 控制
+
+    def orthogonalize(self):
+        # 计算方向矩阵 V = lora_B @ lora_A
+        V = self.lora_B @ self.lora_A
+        # 对 V 进行标准化（简化的正交化处理）
+        V_norm = F.normalize(V, dim=1)  # 按行标准化，确保方向单位化
+        return V_norm
+
+    def forward(self, x, original_weight):
+        # 获取正交化的方向矩阵 V
+        V = self.orthogonalize()
+        # 计算权重更新 ΔW = m * V
+        lora_weight = self.m * V
+        # 应用到原始权重
+        return F.linear(x, original_weight + lora_weight)
+
+
+class BottleneckAdapter(nn.Module):
+    def __init__(self, dim=1024, hidden_dim=128, drop=0.):
+        super().__init__()
+        self.linear1 = nn.Linear(dim, hidden_dim)
+        self.act = nn.GELU()
+        self.linear2 = nn.Linear(hidden_dim, dim)
+        self.ln = nn.LayerNorm(hidden_dim)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        # x: (B*N, S, C)
+        residual = x
+        x = self.linear1(x)  # (B*N, S, hidden_dim)
+        x = self.ln(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.linear2(x)  # (B*N, S, C)
+        return x
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
@@ -46,6 +114,7 @@ class Attention(nn.Module):
             self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
             proj_drop=0., attn_head_dim=None):
         super().__init__()
+        cfg  = get_cfg()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         if attn_head_dim is not None:
@@ -54,6 +123,9 @@ class Attention(nn.Module):
         self.scale = qk_scale or head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
+        if cfg.TRAINING.USE_LORA:
+            self.lora_qkv = LoRALayer(in_features=dim, out_features=all_head_dim * 3, rank=8, scale=16)
+            # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
         if qkv_bias:
             self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
             self.v_bias = nn.Parameter(torch.zeros(all_head_dim))
@@ -66,12 +138,19 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, mask=None):
+        cfg  = get_cfg()
         B, N, C = x.shape
         qkv_bias = None
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
         # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
+        if cfg.TRAINING.USE_LORA:
+            qkv = self.lora_qkv(x, self.qkv.weight)
+            if qkv_bias is not None:
+                qkv += qkv_bias
+        else:
+            qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
+        
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
@@ -91,8 +170,12 @@ class Attention(nn.Module):
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
         x = self.proj(x)
+        # if cfg.TRAINING.USE_LORA:
+        #     x = self.lora_proj(x, self.proj.weight)
+        # else:
+        x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        return x, attn
 
 
 class Block(nn.Module):
@@ -137,6 +220,7 @@ class GeneralAttention(nn.Module):
             self, dim, context_dim=None, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
             proj_drop=0., attn_head_dim=None):
         super().__init__()
+        cfg  = get_cfg()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         if attn_head_dim is not None:
@@ -146,6 +230,11 @@ class GeneralAttention(nn.Module):
 
         self.q = nn.Linear(dim, all_head_dim, bias=False)
         self.kv = nn.Linear(dim if context_dim is None else context_dim, all_head_dim * 2, bias=False)
+        if cfg.TRAINING.USE_LORA:
+            self.lora_q = LoRALayer(in_features=dim, out_features=all_head_dim, rank=8, scale=16)
+            self.lora_kv = LoRALayer(in_features=dim if context_dim is None else context_dim, out_features=all_head_dim * 2, rank=8, scale=16)
+            # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
+
         if qkv_bias:
             self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
             self.v_bias = nn.Parameter(torch.zeros(all_head_dim))
@@ -158,13 +247,27 @@ class GeneralAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, context=None):
+        cfg  = get_cfg()
         B, T1, C = x.shape
         q_bias, kv_bias = self.q_bias, None
         if self.q_bias is not None:
             kv_bias = torch.cat((torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
-        q = F.linear(input=x, weight=self.q.weight, bias=q_bias)
+        
+        if cfg.TRAINING.USE_LORA:
+            q = self.lora_q(x, self.q.weight)
+            if q_bias is not None:
+                q = q + q_bias
+            kv = self.lora_kv(x if context is None else context, self.kv.weight)   
+            # kv = F.linear(input=x if context is None else context, weight=self.kv.weight, bias=kv_bias)
+
+            if kv_bias is not None:
+                kv = kv + kv_bias
+        else:
+            q = F.linear(input=x, weight=self.q.weight, bias=q_bias)
+            kv = F.linear(input=x if context is None else context, weight=self.kv.weight, bias=kv_bias)
+
+        
         q = q.reshape(B, T1, self.num_heads, -1).transpose(1,2) # me: (B, H, T1, C//H)
-        kv = F.linear(input=x if context is None else context, weight=self.kv.weight, bias=kv_bias)
         _, T2, _ = kv.shape
         kv = kv.reshape(B, T2, 2, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1] # make torchscript happy (cannot use tensor as tuple), me： (B, H, T2, C//H)
@@ -172,13 +275,16 @@ class GeneralAttention(nn.Module):
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1)) # me: (B, H, T1, T2)
 
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+        attn = attn.softmax(dim=-1) # (B, H, T1, T2)
+        attn = self.attn_drop(attn) # (B, H, T1, T2)
 
         x = (attn @ v).transpose(1, 2).reshape(B, T1, -1) # (B, H, T1, C//H) -> (B, T1, H, C//H) -> (B, T1, C)
+        # if cfg.TRAINING.USE_LORA:
+        #     x = self.lora_proj(x, self.proj.weight)
+        # else:
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        return x, attn 
 
 
 
@@ -211,7 +317,7 @@ class LGBlock(nn.Module):
         self.first_attn = GeneralAttention(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
-
+        # self.adapter = BottleneckAdapter(dim=dim, hidden_dim=64, drop=drop)
         ## perform global (inter-region) attention on messenger tokens
         ## (messenger<->messenger)
         self.no_second = no_second
@@ -265,11 +371,14 @@ class LGBlock(nn.Module):
         """
         bn = x.shape[0]
         n = bn // b # number of local regions
+        attns = []
         if self.gamma_1 is None:
             # Attention layer
             ## perform local (intra-region) self-attention
             if self.first_attn_type == 'self':
-                x = x + self.drop_path(self.first_attn(self.first_attn_norm0(x)))
+                y, attn = self.first_attn(self.first_attn_norm0(x))
+                attns.append(attn)
+                x = x + self.drop_path(y)
             else: # 'cross'
                 x[:,:1] = x[:,:1] + self.drop_path(
                     self.first_attn(
@@ -283,9 +392,10 @@ class LGBlock(nn.Module):
                 # messenger_tokens: representative tokens
                 # .clone(): fix in-place error in higher pytorch version, please refer to https://github.com/sunlicai/MAE-DFER/issues/3#issuecomment-1809834219
                 messenger_tokens = rearrange(x[:,0].clone(), '(b n) c -> b n c', b=b) # attn on 'n' dim
+                y, attn = self.second_attn(self.second_attn_norm0(messenger_tokens))  # (B, N, C), (B, num_heads, N, N)
                 messenger_tokens = messenger_tokens + self.drop_path(
-                    self.second_attn(self.second_attn_norm0(messenger_tokens))
-                )
+                    y)
+                attns.append(attn)
                 x[:,0] = rearrange(messenger_tokens, 'b n c -> (b n) c')
             else: # for usage in the third attn
                 # .clone(): fix in-place error in higher pytorch version, please refer to https://github.com/sunlicai/MAE-DFER/issues/3#issuecomment-1809834219
@@ -294,23 +404,27 @@ class LGBlock(nn.Module):
             ## perform local-global interaction
             if not self.no_third:
                 if self.third_attn_type == 'self':
-                    x = x + self.drop_path(self.third_attn(self.third_attn_norm0(x)))
+                    y, attn = self.third_attn(self.third_attn_norm0(x))
+                    attns.append(attn)
+                    x = x + self.drop_path(y)
                 else:
                     # .clone(): fix in-place error in higher pytorch version, please refer to https://github.com/sunlicai/MAE-DFER/issues/3#issuecomment-1809834219
                     local_tokens = rearrange(x[:,1:].clone(), '(b n) s c -> b (n s) c', b=b)# NOTE: n merges into s (not b), (B, N*(S-1), D)
-                    local_tokens = local_tokens + self.drop_path(
-                        self.third_attn(
-                            self.third_attn_norm0(local_tokens), # (b, n*(s-1), c)
-                            context=self.third_attn_norm1(messenger_tokens) # (b, n*1, c)
-                        )
+                    y, attn = self.third_attn(
+                        self.third_attn_norm0(local_tokens), # (b, n*(s-1), c)
+                        context=self.third_attn_norm1(messenger_tokens) # (b, n*1, c)
                     )
+                    attns.append(attn)
+                    local_tokens = local_tokens + self.drop_path(y)
                     x[:,1:] = rearrange(local_tokens, 'b (n s) c -> (b n) s c', n=n)
 
             # FFN layer
             x = x + self.drop_path(self.mlp(self.norm2(x)))
+            # adapter_output = self.adapter(x)  # (B*N, S, C)
+            # x = x + self.drop_path(                                                                                   _output)
         else:
             raise NotImplementedError
-        return x
+        return x, attns
 
 
 class PatchEmbed(nn.Module):

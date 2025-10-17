@@ -85,10 +85,10 @@ def init_distributed_mode():
     cfg = get_cfg()
     
     # 如果配置还没有加载，先检查环境变量设置基本参数
-    if not hasattr(cfg, '_content') or not cfg._content:
-        # 配置尚未加载，使用默认值或环境变量
-        if cfg.SYSTEM.DIST_BACKEND == 'nccl':  # 默认值
-            cfg.SYSTEM.DIST_BACKEND = 'gloo'  # 临时设为 gloo 避免问题
+    # if not hasattr(cfg, '_content') or not cfg._content:
+    #     # 配置尚未加载，使用默认值或环境变量
+    #     if cfg.SYSTEM.DIST_BACKEND == 'nccl':  # 默认值
+    #         cfg.SYSTEM.DIST_BACKEND = 'gloo'  # 临时设为 gloo 避免问题
     
     if cfg.SYSTEM.DIST_ON_ITP:
         cfg.SYSTEM.LOCAL_RANK = int(os.environ['OMPI_COMM_WORLD_RANK'])
@@ -195,7 +195,7 @@ class NativeScalerWithGradNormCount:
     def __init__(self):
         self._scaler = torch.cuda.amp.GradScaler()
 
-    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
+    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, model=None):
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
             if clip_grad is not None:

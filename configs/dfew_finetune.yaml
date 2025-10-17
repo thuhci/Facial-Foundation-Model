@@ -1,5 +1,5 @@
-# Gaze360 finetuning configuration
-# This file contains all the parameters for training the gaze estimation model
+# dfew finetuning configuration
+# This file contains all the parameters for training the emoti-detection model
 
 model:
   name: vit_base_dim512_no_depth_patch16_160
@@ -14,7 +14,7 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -25,7 +25,7 @@ model:
 
 data:
   dataset_name: DFEW
-  data_path: /home/qzk/Facial-Foundation-Model/saved/data/dfew_224/org/split01
+  data_path: /root/shared/fliangae/Facial-Foundation-Model/saved/data/dfew/split01
   eval_data_path: null
   num_classes: 7
   # num_classes_cls: 7
@@ -36,7 +36,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 32
+  batch_size: 24
   num_workers: 20
   pin_memory: true
 
@@ -91,10 +91,10 @@ optimization:
   layer_decay: 0.75
 
 training:
-  epochs: 50
+  epochs: 100
   start_epoch: 0
-  update_freq: 1
-  save_ckpt_freq: 10
+  update_freq: 10
+  save_ckpt_freq: 1
   
   # Model EMA
   model_ema: false
@@ -110,11 +110,16 @@ training:
   save_ckpt: true
   auto_resume: true
   resume: ''
-  finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
+  finetune: /root/shared/fliangae/Facial-Foundation-Model/output/checkpoint-49.pth
+
   # finetune: null
 
   # Validation metric
   val_metric: acc1
+
+  # freeze
+  freeze: true
+  use_lora: true
 
 gaze:
   # L2CS configuration (advanced gaze estimation method)
@@ -126,7 +131,7 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/mafw_finetune_yaml_config
+  output_dir: ./output/dfew_finetune_shortcutconv2
   log_dir: null
   
   # Distributed training
@@ -134,7 +139,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 启用分布式训练
+  distributed: true  # 启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

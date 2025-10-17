@@ -17,7 +17,7 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -28,7 +28,7 @@ model:
 
 data:
   dataset_name: Gaze360
-  data_path: saved/data/gaze360T
+  data_path: /root/lfz/Facial-Foundation-Model/saved/data/gaze360T
   eval_data_path: null
   task: regression
   num_classes: 2
@@ -95,7 +95,7 @@ training:
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 1
-  
+
   # Model EMA
   model_ema: false
   model_ema_decay: 0.9999
@@ -110,10 +110,14 @@ training:
   save_ckpt: true
   auto_resume: true
   resume: ''
-  finetune: saved/model/pretraining/voxceleb2/videomae_pretrain_base_dim512_local_global_attn_depth16_region_size2510_patch16_160_frame_16x4_tube_mask_ratio_0.9_e100_with_diff_target_server170/checkpoint-49.pth
+  finetune: /root/shared/fliangae/Facial-Foundation-Model/output/checkpoint-49.pth
   
   # Validation metric
   val_metric: acc1
+
+  # freeze
+  freeze: true
+  use_lora: true
 
 gaze:
   # L2CS configuration (advanced gaze estimation method)
@@ -125,7 +129,7 @@ gaze:
 system:
   device: cuda
   seed: 0
-  output_dir: ./output/gaze360_finetune_yaml_config
+  output_dir: ./output/freeze/gaze360T_0
   log_dir: null
   
   # Distributed training
@@ -133,7 +137,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 不启用分布式训练
+  distributed: true
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

@@ -111,6 +111,55 @@ def create_data_loaders():
     
     return data_loader_train, data_loader_val
 
+# 新增：冻结encoder的函数
+
+def check_gradient_status(model):
+    """Check if trainable parameters are receiving gradients after a backward pass.
+    Call this function after loss.backward() to verify gradient updates."""
+    print("\nChecking gradient status for trainable parameters:")
+    missing_grads = []
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.grad is None:
+                missing_grads.append(name)
+                print(f"  WARNING: {name} has no gradient (not updated)!")
+            else:
+                print(f"  {name}: Gradient norm = {param.grad.norm().item()}")
+    
+    if missing_grads:
+        print(f"\nWARNING: {len(missing_grads)} trainable parameters did not receive gradients:")
+        for name in missing_grads:
+            print(f"  - {name}")
+    else:
+        print("All trainable parameters received gradients.")
+    
+def freeze_encoder(model):
+    """Freeze all parameters except the decoder and classification head."""
+    cfg = get_cfg()
+    for name, param in model.named_parameters():
+        # if cfg.TRAINING.FREEZE
+        #     if 'decoder' in name or 'head' in name:  # 解冻decoder和head的参数
+        #         param.requires_grad = True
+        #     else:  # 冻结encoder参数（patch_embed, pos_embed, blocks等）
+        #         param.requires_grad = False
+        if cfg.TRAINING.USE_LORA:
+            if 'lora_' in name or 'decoder' in name or 'head' in name or 'dora_' in name: # 解冻LoRA参数、decoder和head的参数
+                print(f"Unfreezing parameter: {name}")
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+        else:
+            if 'decoder' in name or 'head' in name or 'adapter' in name or 'shortcut' in name:  # 解冻decoder和head的参数
+                print(f"Unfreezing parameter: {name}")
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+    print("Model parameters after freezing:")
+    # 打印可训练参数量
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters: {trainable_params}")
+
+    # check_gradient_status(model)
 
 def create_model_from_config():
     """Create model from global configuration."""
@@ -200,6 +249,46 @@ def create_model_from_config():
                 'yaw': torch.nn.Linear(in_features, cfg.GAZE.NUM_BINS)
             })
         else:
+            if cfg.TRAINING.FREEZE:
+                # 定义MLP decoder
+                if cfg.TRAINING.DECODER == 'mlp':
+                    print("Using MLP decoder for gaze regression")
+                    # model.decoder = decoder.MLPDecoder(in_dim=in_features, out_dim=256, hidden_dim=512)
+                    # model.head = torch.nn.Linear(512, cfg.DATA.NUM_CLASSES)                    
+
+                    model.decoder = torch.nn.Sequential(
+                        torch.nn.Linear(in_features, 512),  # [B, T, in_features] -> [B, T, 512]
+                        torch.nn.ReLU(),
+                        torch.nn.Linear(512, in_features),         # [B, T, 256] -> [B, T, 256]
+                        torch.nn.ReLU()
+                    )
+                    model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)  # [B, T, 512] -> [B, T, 2]
+                else:
+                    print("Using default decoder for regression") 
+                    model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+            else:
+                # 原始方式：直接回归2个角度
+                model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
+    elif cfg.DATA.TASK == 'classification':
+        in_features = model.head.in_features
+        if cfg.TRAINING.FREEZE:
+            if cfg.TRAINING.DECODER == 'mlp':
+                print("Using MLP decoder for emotion classification")
+                # model.decoder = decoder.MLPDecoder(in_dim=in_features, out_dim=256, hidden_dim=512)
+                # model.head = torch.nn.Linear(512, cfg.DATA.NUM_CLASSES)                    
+
+                model.decoder = torch.nn.Sequential(
+                    torch.nn.Linear(in_features, 512),  # [B, T, in_features] -> [B, T, 512]
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(512, in_features),         # [B, T, 256] -> [B, T, 256]
+                    torch.nn.ReLU()
+                )
+                model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)  # [B, T, 512] -> [B, T, 2] 
+            else: 
+                print("Using default decoder for classification")
+                model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
+        else:
+            model.head = torch.nn.Linear(model.head.in_features, cfg.DATA.NUM_CLASSES)
             # 原始方式：直接回归2个角度
             model.head = torch.nn.Linear(in_features, cfg.DATA.NUM_CLASSES)
     elif cfg.DATA.TASK == "combine":
@@ -297,7 +386,8 @@ def create_model_from_config():
 
     # print("Model = %s" % str(model_without_ddp))
     # print('number of params:', n_parameters)
-    
+    # if cfg.TRAINING.USE_LORA:
+    #     freeze_encoder(model)
     return model
 
 
@@ -494,7 +584,7 @@ def main(args):
             # Gloo 后端不需要指定 device_ids
             model = torch.nn.parallel.DistributedDataParallel(
                 model,
-                find_unused_parameters=False,
+                find_unused_parameters=True,
                 broadcast_buffers=True
             )
         else:
@@ -503,7 +593,7 @@ def main(args):
                 model, 
                 device_ids=[utils.get_rank()], 
                 output_device=utils.get_rank(),
-                find_unused_parameters=False,
+                find_unused_parameters=True,
                 broadcast_buffers=True
             )
         model_without_ddp = model.module
@@ -555,7 +645,9 @@ def main(args):
     print("Update frequent = %d" % cfg.TRAINING.UPDATE_FREQ)
     print("Number of training examples = %d" % len(data_loader_train.dataset))
     print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
-    
+    if cfg.TRAINING.FREEZE:
+        freeze_encoder(model)
+    # check_gradient_status(model)
     # Create scheduler
     lr_schedule_values, wd_schedule_values = create_scheduler_from_config(
         optimizer, num_training_steps_per_epoch
@@ -739,7 +831,7 @@ def main(args):
                     utils.save_model(
                         "best", model, model_without_ddp, optimizer, 
                         loss_scaler, model_ema)
-        
+        # check_gradient_status(model)
         print(f'Max {metric_name if "metric_name" in locals() else "accuracy"}: {max_accuracy:.4f} at epoch {best_epoch}')
     
     # Final evaluation with detailed metrics
