@@ -25,7 +25,8 @@ class ValidationEngine:
     def __init__(self, model: nn.Module, device: torch.device):
         self.model = model
         self.device = device
-        self.flag = False
+        self.flag = False # [DEBUG]
+        self.cfg = get_cfg()
         
     
     @torch.no_grad()
@@ -136,6 +137,15 @@ class ValidationEngine:
                     reg_tar = targets["reg"].reshape(-1, 2)
                     cls_pred = output['cls'].reshape(-1, cfg.DATA.NUM_CLASSES_CLS)
                     reg_pred = output['reg'].reshape(-1, 2)
+                    
+                    
+                    # # [DEBUG], try this!
+                    # bsz = videos.shape[0]
+                    # cls_pred = cls_pred.reshape(bsz, -1, self.cfg.DATA.NUM_CLASSES_CLS)
+                    # cls_pred = cls_pred.mean(1)
+                    # cls_tar = cls_tar.reshape(bsz, -1)
+                    # assert (cls_tar[:,0] == cls_tar[:,1]).all()
+                    # cls_tar = cls_tar[:,0]
 
                     # Compute losses
                     cls_loss = criterion['cls_criterion'](cls_pred, cls_tar)
@@ -254,8 +264,8 @@ class ValidationEngine:
             with torch.cuda.amp.autocast():
                 output = self.model(videos)
                 
-                if cfg.DATA.TASK == 'regression':
-                    predictions = output.argmax(dim=1)
+                if cfg.DATA.TASK == 'classification':
+                    predictions = output.argmax(dim=-1)
                     all_predictions.extend(predictions.cpu().numpy())
                     all_targets.extend(targets.cpu().numpy())
                     all_outputs.extend(output.cpu().numpy())
@@ -263,22 +273,35 @@ class ValidationEngine:
                     # For combine task, use classification predictions
                     cls_pred = output['cls']
                     cls_tar = targets["cls"]
-                    predictions = cls_pred.argmax(dim=1)
+                    
+                    # # [DEBUG], try this!
+                    # bsz = videos.shape[0]
+                    # cls_pred = cls_pred.reshape(bsz, -1, self.cfg.DATA.NUM_CLASSES_CLS)
+                    # cls_pred = cls_pred.mean(1)
+                    # cls_tar = cls_tar.reshape(bsz, -1)
+                    # cls_tar = cls_tar[:,0]
+                    
+                    predictions = cls_pred.argmax(dim=-1)
                     all_predictions.extend(predictions.cpu().numpy())
                     all_targets.extend(cls_tar.cpu().numpy())
                     all_outputs.extend(cls_pred.cpu().numpy())
                 else:
-                    # Classification task
-                    predictions = output.argmax(dim=1)
-                    all_predictions.extend(predictions.cpu().numpy())
-                    all_targets.extend(targets.cpu().numpy())
-                    all_outputs.extend(output.cpu().numpy())
-
+                    # regression task - skip for now
+                    continue
         if (cfg.DATA.TASK == 'classification' or cfg.DATA.TASK == 'combine') and len(all_predictions) > 0:
             from sklearn.metrics import confusion_matrix, f1_score, classification_report
             import pandas as pd
             
             # Compute confusion matrix
+            # print("all_targets:", all_targets.shape, all_targets[:10])
+            # print("all_predictions:", all_predictions.shape,   all_predictions[:10])
+            all_targets = np.array(all_targets)
+            all_predictions = np.array(all_predictions)
+            # print(f"shape of all_targets: {all_targets.shape}, shape of all_predictions: {all_predictions.shape}")
+            if all_targets.ndim > 1:
+                all_targets = all_targets.flatten()
+            if all_predictions.ndim > 1:
+                all_predictions = all_predictions.flatten()
             conf_mat = confusion_matrix(y_true=all_targets, y_pred=all_predictions)
             
             # Compute per-class accuracies  

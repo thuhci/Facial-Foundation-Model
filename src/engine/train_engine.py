@@ -207,9 +207,19 @@ class TrainingEngine:
             reg_pred = outputs['reg'].reshape(-1, 2)
             # print("cls_tar.shape", cls_tar.shape, "reg_tar.shape", reg_tar.shape)
             # print("cls_pred.shape", cls_pred.shape, "reg_pred.shape", reg_pred.shape)
+            
+            # # [DEBUG], try this!
+            # bsz = samples.shape[0]
+            # cls_pred = cls_pred.reshape(bsz, -1, self.cfg.DATA.NUM_CLASSES_CLS)
+            # cls_pred = cls_pred.mean(1)
+            # cls_tar = cls_tar.reshape(bsz, -1)
+            # assert (cls_tar[:,0] == cls_tar[:,1]).all()
+            # cls_tar = cls_tar[:,0]
+            # print("[DEBUG] shape of cls_pred:", cls_pred.shape, "shape of cls_tar:", cls_tar.shape)
+
             cls_loss = self.criterion['cls_criterion'](cls_pred, cls_tar)
             reg_loss = self.criterion['reg_criterion'](reg_pred, reg_tar) 
-            loss = self.cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + reg_loss
+            loss = self.cfg.TRAINING.COMBINE_LOSS_ALPHA * cls_loss + (1 - self.cfg.TRAINING.COMBINE_LOSS_ALPHA) * reg_loss
             return loss, outputs
         
         else:
@@ -295,6 +305,14 @@ class TrainingEngine:
                 reg_tar = targets["reg"].reshape(-1, 2)
                 cls_pred = output['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
                 reg_pred = output["reg"].reshape(-1, 2)
+                
+                # [DEBUG], try this!
+                # bsz = output["reg"].shape[0]
+                # cls_pred = cls_pred.reshape(bsz, -1, self.cfg.DATA.NUM_CLASSES_CLS)
+                # cls_pred = cls_pred.mean(1)
+                # cls_tar = cls_tar.reshape(bsz, -1)
+                # cls_tar = cls_tar[:,0]
+                
                 class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
                 angular_error = compute_angular_error(reg_pred, reg_tar)
                 metric_logger.update(angular_error=angular_error)
@@ -355,6 +373,15 @@ class TrainingEngine:
                 reg_tar = targets["reg"].reshape(-1, 2)
                 cls_pred = output['cls'].reshape(-1, self.cfg.DATA.NUM_CLASSES_CLS)
                 reg_pred = output["reg"].reshape(-1, 2)
+                
+                
+                # [DEBUG], try this!
+                # bsz = output["reg"].shape[0]
+                # cls_pred = cls_pred.reshape(bsz, -1, self.cfg.DATA.NUM_CLASSES_CLS)
+                # cls_pred = cls_pred.mean(1)
+                # cls_tar = cls_tar.reshape(bsz, -1)
+                # cls_tar = cls_tar[:,0]
+                
                 class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
                 angular_error = compute_angular_error(reg_pred, reg_tar)
                 self.log_writer.update(angular_error=angular_error, head="loss")

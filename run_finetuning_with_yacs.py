@@ -626,121 +626,127 @@ def main(args):
     
     # Evaluation mode
     if args.eval:
-        test_stats = validation_engine.validate(data_loader_val)
-        print(f"Validation results: {test_stats}")
-        return
-    
-    # Training loop
-    print(f"Start training for {cfg.TRAINING.EPOCHS} epochs")
-    start_time = time.time()
-    max_accuracy = 0.0
-    best_epoch = 0
-    
-    for epoch in range(start_epoch, cfg.TRAINING.EPOCHS):
-        if cfg.SYSTEM.DISTRIBUTED:
-            data_loader_train.sampler.set_epoch(epoch)
+        # test_stats = validation_engine.validate(data_loader_val)
+        # print(f"Validation results: {test_stats}")
+        # return
+        pass
+    else:
         
-        # Training
-        train_stats = training_engine.train_one_epoch(
-            data_loader_train,
-            epoch,
-            lr_schedule_values,
-            wd_schedule_values,
-            num_training_steps_per_epoch,
-            epoch * num_training_steps_per_epoch
-        )
+        # Training loop
+        print(f"Start training for {cfg.TRAINING.EPOCHS} epochs")
+        start_time = time.time()
+        max_accuracy = 0.0
+        best_epoch = 0
         
-        # Validation
-        test_stats = validation_engine.validate(data_loader_val)
-        
-        # Update learning rate
-        # lr_scheduler.step(epoch)
-        
-        # Save checkpoint
-        if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
-            checkpoint_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, f'checkpoint-{epoch}.pth')
-            # utils.save_checkpoint(
-            #     {
-            #         'model': model_without_ddp.state_dict(),
-            #         'optimizer': optimizer.state_dict(),
-            #         # 'lr_scheduler': lr_scheduler.state_dict(),
-            #         'epoch': epoch,
-            #         'scaler': loss_scaler.state_dict(),
-            #         'config': cfg,
-            #         'model_ema': model_ema.state_dict() if model_ema else None,
-            #     },
-            #     checkpoint_path
-            # )
-            utils.save_model(epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema)
-        
-        # Log stats
-        log_stats = {
-            **{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'test_{k}': v for k, v in test_stats.items()},
-            'epoch': epoch,
-            'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
-        }
-        
-        # Log validation metrics to wandb/tensorboard
-        if log_writer is not None:
-            # Set epoch step for logging
-            log_writer.set_step(epoch)
+        for epoch in range(start_epoch, cfg.TRAINING.EPOCHS):
+            if cfg.SYSTEM.DISTRIBUTED:
+                data_loader_train.sampler.set_epoch(epoch)
             
-            # Log validation metrics with 'val' prefix
-            log_writer.update(head='val', step=epoch, **test_stats)
+            # Training
+            train_stats = training_engine.train_one_epoch(
+                data_loader_train,
+                epoch,
+                lr_schedule_values,
+                wd_schedule_values,
+                num_training_steps_per_epoch,
+                epoch * num_training_steps_per_epoch
+            )
             
-            # Log training metrics with 'train' prefix  
-            log_writer.update(head='train', step=epoch, **train_stats)
+            # Validation
+            test_stats = validation_engine.validate(data_loader_val)
             
-            # Log other epoch info
-            log_writer.update(head='epoch', step=epoch, 
-                            epoch=epoch, 
-                            n_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
-        
-        try:
-            if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
-                with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
-                    f.write(json.dumps(log_stats) + "\n")
-        except Exception as e:
-            print(f"Error saving log stats: {e}")
-        
-        # Track best accuracy and save best model
-        if cfg.DATA.TASK == 'regression':
-            current_metric = test_stats.get('mean_angle_error', 1e8)
-            if current_metric < max_accuracy or epoch == start_epoch:
-                max_accuracy = current_metric
-                best_epoch = epoch
-                # Save best model
-                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
-                    utils.save_model(
-                        "best", model, model_without_ddp, optimizer, 
-                        loss_scaler, model_ema)
-        # elif cfg.DATA.TASK == "combine":
-        #     current_metric = test_stats.get('mean_angle_error', 1e8)
-        #     if current_metric < max_accuracy or epoch == start_epoch:
-        #         max_accuracy = current_metric
-        #         best_epoch = epoch
-        #         # Save best model
-        #         if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
-        #             utils.save_model(
-        #                 "best", model, model_without_ddp, optimizer, 
-                        # loss_scaler, model_ema)
-        else:
-            # For classification, we can choose different metrics for best model selection
-            metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
-            current_metric = test_stats.get(metric_name, 0)
-            is_better = current_metric > max_accuracy
+            # Update learning rate
+            # lr_scheduler.step(epoch)
             
-            if is_better or epoch == start_epoch:
-                max_accuracy = current_metric
-                best_epoch = epoch
-                # Save best model
-                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
-                    utils.save_model(
-                        "best", model, model_without_ddp, optimizer, 
-                        loss_scaler, model_ema)
-        
-        print(f'Max {metric_name if "metric_name" in locals() else "accuracy"}: {max_accuracy:.4f} at epoch {best_epoch}')
+            # Save checkpoint
+            if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                checkpoint_path = os.path.join(cfg.SYSTEM.OUTPUT_DIR, f'checkpoint-{epoch}.pth')
+                # utils.save_checkpoint(
+                #     {
+                #         'model': model_without_ddp.state_dict(),
+                #         'optimizer': optimizer.state_dict(),
+                #         # 'lr_scheduler': lr_scheduler.state_dict(),
+                #         'epoch': epoch,
+                #         'scaler': loss_scaler.state_dict(),
+                #         'config': cfg,
+                #         'model_ema': model_ema.state_dict() if model_ema else None,
+                #     },
+                #     checkpoint_path
+                # )
+                utils.save_model(epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema)
+            
+            # Log stats
+            log_stats = {
+                **{f'train_{k}': v for k, v in train_stats.items()},
+                **{f'test_{k}': v for k, v in test_stats.items()},
+                'epoch': epoch,
+                'n_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad)
+            }
+            
+            # Log validation metrics to wandb/tensorboard
+            if log_writer is not None:
+                # Set epoch step for logging
+                log_writer.set_step(epoch)
+                
+                # Log validation metrics with 'val' prefix
+                log_writer.update(head='val', step=epoch, **test_stats)
+                
+                # Log training metrics with 'train' prefix  
+                log_writer.update(head='train', step=epoch, **train_stats)
+                
+                # Log other epoch info
+                log_writer.update(head='epoch', step=epoch, 
+                                epoch=epoch, 
+                                n_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
+            
+            try:
+                if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process() and epoch % cfg.TRAINING.SAVE_CKPT_FREQ == 0:
+                    with open(os.path.join(cfg.SYSTEM.OUTPUT_DIR, "log.txt"), "a") as f:
+                        f.write(json.dumps(log_stats) + "\n")
+            except Exception as e:
+                print(f"Error saving log stats: {e}")
+            
+            # Track best accuracy and save best model
+            if cfg.DATA.TASK == 'regression':
+                current_metric = test_stats.get('mean_angle_error', 1e8)
+                if current_metric < max_accuracy or epoch == start_epoch:
+                    max_accuracy = current_metric
+                    best_epoch = epoch
+                    # Save best model
+                    if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                        utils.save_model(
+                            "best", model, model_without_ddp, optimizer, 
+                            loss_scaler, model_ema)
+            # elif cfg.DATA.TASK == "combine":
+            #     current_metric = test_stats.get('mean_angle_error', 1e8)
+            #     if current_metric < max_accuracy or epoch == start_epoch:
+            #         max_accuracy = current_metric
+            #         best_epoch = epoch
+            #         # Save best model
+            #         if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+            #             utils.save_model(
+            #                 "best", model, model_without_ddp, optimizer, 
+                            # loss_scaler, model_ema)
+            else:
+                # For classification, we can choose different metrics for best model selection
+                metric_name = cfg.TRAINING.VAL_METRIC if hasattr(cfg.TRAINING, 'VAL_METRIC') else 'acc1'
+                current_metric = test_stats.get(metric_name, 0)
+                is_better = current_metric > max_accuracy
+                
+                if is_better or epoch == start_epoch:
+                    max_accuracy = current_metric
+                    best_epoch = epoch
+                    # Save best model
+                    if cfg.SYSTEM.OUTPUT_DIR and utils.is_main_process():
+                        utils.save_model(
+                            "best", model, model_without_ddp, optimizer, 
+                            loss_scaler, model_ema)
+            
+            print(f'Max {metric_name if "metric_name" in locals() else "accuracy"}: {max_accuracy:.4f} at epoch {best_epoch}')
+            
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        print(f'Training time {total_time_str}')
     
     # Final evaluation with detailed metrics
     print("Performing final evaluation...")
@@ -753,7 +759,7 @@ def main(args):
         
         # Save detailed results
         final_results = {
-            'angular_err': final_test_stats.get('angular_err', None),
+            'angular_err': final_test_stats.get('angular_err', 0),
             'final_acc1': final_test_stats.get('acc1', 0),
             'final_acc5': final_test_stats.get('acc5', 0),
             'final_uar': final_test_stats.get('uar', 0),
@@ -761,8 +767,8 @@ def main(args):
             'final_weighted_f1': final_test_stats.get('weighted_f1', 0),
             'final_micro_f1': final_test_stats.get('micro_f1', 0),
             'final_macro_f1': final_test_stats.get('macro_f1', 0),
-            'best_epoch': best_epoch,
-            'best_metric': max_accuracy
+            'best_epoch': best_epoch if 'best_epoch' in locals() else None,
+            'best_metric': max_accuracy if 'max_accuracy' in locals() else None,
         }
         
         print(f"Final Results:")
@@ -800,9 +806,7 @@ def main(args):
     if log_writer is not None:
         log_writer.finish()
     
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print(f'Training time {total_time_str}')
+    
 
 
 if __name__ == '__main__':
