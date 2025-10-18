@@ -9,7 +9,8 @@ Gaze360/
 __pycache__
 **/discarded*.py
 debug_data/
-*.txt
+*.txt         
+!requirements.txt 
 wandb/
 # *.csv
 saved/
