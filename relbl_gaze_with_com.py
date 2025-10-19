@@ -18,14 +18,14 @@ from run_finetuning_with_yacs import create_data_loaders, create_model_from_conf
 all_data = []
 
 # your split-by-video folder
-csv_folder = "/home/qzk/CelebV-Text/downloaded_celebvtext/txt"   
+csv_folder = "/home/qzk/Facial-Foundation-Model/saved/data/GC_combine/val"   
 
 # config & path for your relabel model
-config_path = 'configs/gaze360T.yaml'
-model_path = "/home/qzk/Facial-Foundation-Model/output/gaze360T_16dataset/checkpoint-best.pth"
+config_path = 'configs/GC_combine.yaml'
+model_path = "/home/qzk/Facial-Foundation-Model/output/dfew_T_0_debug_2/checkpoint-99.pth"
 
 # output path for the relabeled data
-out_csv_path = "output/relabeled_data.csv"
+out_csv_path = "output/relbl/dfew1_GC.csv"
 
 # read all csv  N frames
 # split by 16 frames, with name & lbl for each
@@ -38,7 +38,7 @@ import imageio
 all_csvs = os.listdir(csv_folder)
 processed_count = 0
 for csv in all_csvs:
-    if not (csv.endswith(".csv") or csv.endswith("txt")):
+    if not csv.endswith(".csv") :
         continue
     
     # processed_count += 1
@@ -164,7 +164,7 @@ class relblDataset(Dataset):
         
         return {"images": img_tensor, "labels": labels, "folder": paths}
 
-data_loader = DataLoader(relblDataset(all_data), batch_size=32, shuffle=False, num_workers=20)
+data_loader = DataLoader(relblDataset(all_data), batch_size=64, shuffle=False, num_workers=20)
 
 print("len of data_loader is ", len(data_loader))
 
@@ -204,7 +204,7 @@ for j, data in enumerate(data_loader):
     with torch.no_grad():
         output = model(images)
         # print(output.shape)
-        output=output.reshape(images.shape[0], images.shape[2], 2)
+        output=output["reg"].reshape(images.shape[0], images.shape[2], 2)
         data["gaze"] = output.detach().cpu().numpy()
 
     # print("[DEBUG]", images.shape)
@@ -230,4 +230,4 @@ for j, data in enumerate(data_loader):
 
 with open(out_csv_path, "w") as f:
     for folder, lbl in relabeled_data.items():
-        f.write(f"{folder} {lbl[0]} {lbl[1][0]} {lbl[1][1]}\n")
+        f.write(f"{folder} {lbl[1][0]} {lbl[1][1]}\n")

@@ -7,7 +7,7 @@ import numpy as np
 #      modify this output_root                                  #
 #################################################################
 
-output_root = '/home/qzk/Facial-Foundation-Model/saved/data/gaze360T_combine'
+output_root = '/home/qzk/Facial-Foundation-Model/saved/data/CelebV_com_ori'
 
 
 def GazeTo2d(gaze):
@@ -32,14 +32,15 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
                 os.rmdir(os.path.join(root, name))
     else:
         os.makedirs(output_root)
-    for split in ["train", "test", "val"]:
+    # for split in ["train", "test", "val"]:
+        
+    for split in ["train", "val"]:
         print("processing split", split)
-    # for split in ["test"]:
-    
         #################################################################
         #      modify this txt_path to your original csv / txt          #
         #################################################################
-        txt_path = f"/home/qzk/Facial-Foundation-Model/saved/data/gaze360/{split}.csv"
+        txt_path = f"/home/qzk/Facial-Foundation-Model/saved/data/CelebV_emo_ori/{split}.csv"
+        # txt_path = "/home/qzk/CelebV-Text/downloaded_celebvtext/all_celebvtext.txt"
         out_path = f"{output_root}/{split}"
         if not os.path.exists(out_path):
             os.makedirs(out_path)
@@ -58,25 +59,31 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
                 #      modify here to get proper rec_name & frame_name          #
                 #################################################################
                 
-                rec_name = int(line.split('/')[5].split("_")[-1])
-                per_name =  int(line.split('/')[7])
-                frame_name = int(line.split('/')[8].split('.')[0])
+                # rec_name = int(line.split('/')[6].split("_")[-1])
+                rec_name = line.split('/')[6]
+                # per_name =  int(line.split('/')[7])
+                frame_name = int(line.split('/')[7].split('.')[0])
                 # frame_name = line.split('/')[9].split('.')[0]
-                lbl = line.split('/')[8].split(' ')[1:]
+                lbl = line.split('/')[7].split(' ')[1:]
                 # print("rec_name", rec_name, "per_name", per_name, "frame_name", frame_name, "lbl", lbl)
                 lbl = [float(x) for x in lbl]
-                lbl = GazeTo2d(lbl)
+                # lbl = GazeTo2d(lbl)
 
-                line = line.split(' ')[0] + " 0 " + str(lbl[0]) + ' ' + str(lbl[1])
+                # line = li
+                # ne.split(' ')[0] + " 0 " + str(lbl[0]) + ' ' + str(lbl[1])
 
                 # print("rec_name", rec_name, "per_name", per_name, "frame_name", frame_name, "lbl", lbl)
                 
                 # print("line: ", line)
+                # line = line.replace("/home/qzk/Gaze360/GazeCapture/data/", "/root/shared/GazeDatasets/GazeCapture/normalized_imgs/")
                 
-                txt_lines.append((line, rec_name, per_name, frame_name, lbl))
+                # txt_lines.append((line, rec_name, per_name, frame_name, lbl))
+                txt_lines.append((line, rec_name, frame_name, lbl))
 
         # sort by rec_name, vid_name, frame_name
-        txt_lines.sort(key=lambda x: (x[1], x[2], x[3]))
+        
+        # txt_lines.sort(key=lambda x: (x[1], x[2], x[3]))
+        txt_lines.sort(key=lambda x: (x[1], x[2]))
         lst = 0
         files = []
 
@@ -84,10 +91,11 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         for i in range(1, len(txt_lines)):
             txt_line = txt_lines[i]
             lst_line = txt_lines[i-1]
-            # if txt_line[1] == lst_line[1] and txt_line[2] <= lst_line[2] + gap_threshold:
-            if txt_line[1] == lst_line[1] and txt_line[2] == lst_line[2] and txt_line[3] <= lst_line[3] + gap_threshold:
+            if txt_line[1] == lst_line[1] and txt_line[2] <= lst_line[2] + gap_threshold:
+            # if txt_line[1] == lst_line[1] and txt_line[2] == lst_line[2] and txt_line[3] <= lst_line[3] + gap_threshold:
                 # curr_file.append(txt_line)
-                for j in range(int(txt_line[3]) - int(lst_line[3])):
+                # for j in range(int(txt_line[3]) - int(lst_line[3])):
+                for j in range(int(txt_line[2]) - int(lst_line[2])):
                     curr_file.append(txt_line)
                 continue
             lst = i
