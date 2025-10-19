@@ -9,13 +9,13 @@ model:
   attn_drop_rate: 0.0
   drop_path: 0.1
   use_mean_pooling: True
-  depth: 16
+  # depth: 16
 
   keep_temporal_dim: True 
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -25,16 +25,15 @@ model:
   lg_no_third: false
 
 data:
-  dataset_name: MAFW_combine
-  data_path: /home/qzk/Facial-Foundation-Model/saved/data/mafw_combine/split01
+  dataset_name: DFEW_combine
+  data_path: /home/qzk/Facial-Foundation-Model/saved/data/CelebV_com_ori
   eval_data_path: null
-  num_classes: 11
-  num_classes_cls: 11
+  num_classes: 7
+  num_classes_cls: 7
   num_dim_reg: 2
   num_segments: 1
   num_frames: 16
   sampling_rate: 1
-  clip_stride: 999
   imagenet_default_mean_and_std: true
   
   # Data loading
@@ -69,7 +68,7 @@ augmentation:
   random_erase_split: false
   
   # Label smoothing (disabled for regression)
-  label_smoothing: 0.1
+  label_smoothing: 0.0
 
 optimization:
   optimizer: adamw
@@ -98,7 +97,7 @@ training:
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 10
-  combine_loss_alpha : 1.0  # Weight for classification loss in combined loss
+  combine_loss_alpha : 1  # Weight for classification loss in combined loss
   
   # Model EMA
   model_ema: false

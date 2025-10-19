@@ -729,8 +729,17 @@ class VideoRegDatasetFrame(Dataset):
                     # Generate valid clip starting positions for this CSV
                     # Use clip_stride for determining interval between clips
                     max_start_idx = len(image_paths) - converted_len + 1
-                    for start_idx in range(0, max_start_idx, self.clip_stride):
-                        self.valid_clips.append((csv_idx, start_idx))
+                    
+                    # [DEBUG] try this!
+                    if self.clip_stride==999:
+                        clips_this_csv = []
+                        for start_idx in range(0, max_start_idx):
+                            clips_this_csv.append((csv_idx, start_idx))
+                        chosen_clip = np.random.choice(len(clips_this_csv), size=1, replace=False)
+                        self.valid_clips.append(clips_this_csv[chosen_clip[0]])
+                    else:
+                        for start_idx in range(0, max_start_idx, self.clip_stride):
+                            self.valid_clips.append((csv_idx, start_idx))
                         
                 except Exception as e:
                     print(f"Error loading {csv_file}: {e}")
