@@ -6,7 +6,7 @@ checkpoint/
 imgs/
 Gaze360/
 *.pth
-__pycache__
+*__pycache__*
 **/discarded*.py
 debug_data/
 *.txt
