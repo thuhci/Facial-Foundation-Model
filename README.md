@@ -21,7 +21,16 @@ Inspired by recent success of VideoMAE, MAE-DFER makes an early attempt to devis
 
 Extensive experiments on *six* DFER datasets show that our MAE-DFER *consistently* outperforms the previous best supervised methods by *significant* margins (**\+5∼8%** UAR on three *in-the-wild* datasets and **\+7∼12%** WAR on three *lab-controlled* datasets), which demonstrates that it can learn *powerful* dynamic facial representations for DFER via large-scale self-supervised pre-training. We believe MAE-DFER **has paved a new way** for the advancement of DFER and can inspire more relevant research in this field and even other related tasks (e.g., dynamic micro-expression recognition and facial action unit detection).
 
-
+#### Evaluation
+* **UAR （Unweighted Accuracy Rate）**
+  $\text{UAR} = \frac{1}{N} \sum_{i=1}^{N} \text{Accuracy}_i$
+* **WAR （Weighted Accuracy Rate）**
+  $\text{WAR} = \sum_{i=1}^{N} \left( \frac{n_i}{N} \times \text{Accuracy}_i \right)$
+   * $n_i$ is the number of samples in class i
+   * $N$ is the total number of samples
+   * $Accuracy_i$ is the accuracy for class i
+ 
+**WAR** is more common-used
 
 ### 🔨 Installation
 
