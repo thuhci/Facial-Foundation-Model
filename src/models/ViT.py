@@ -19,8 +19,6 @@ def _cfg(url='', **kwargs):
     }
 
 
-
-
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -101,7 +99,7 @@ class VisionTransformer(nn.Module):
                     first_attn_type=lg_first_attn_type, third_attn_type=lg_third_attn_type,
                     attn_param_sharing_first_third=lg_attn_param_sharing_first_third,
                     attn_param_sharing_all=lg_attn_param_sharing_all,
-                    no_second=lg_no_second, no_third=lg_no_third,
+                    no_second=lg_no_second, no_third=lg_no_third, blk_id=i,
                 )
                 for i in range(depth)])
             # region tokens

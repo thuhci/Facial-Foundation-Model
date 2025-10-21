@@ -39,7 +39,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 48
+  batch_size: 24
   num_workers: 20
   pin_memory: true
 
@@ -116,8 +116,8 @@ training:
   val_metric: acc1
 
   # freeze
-  freeze: true
-  use_lora: true
+  freeze: false
+  use_lora: false
 
 gaze:
   # L2CS configuration (advanced gaze estimation method)

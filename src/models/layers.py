@@ -8,6 +8,10 @@ from timm.models.registry import register_model
 from einops import rearrange, repeat
 from src.utils.config import get_cfg
 
+USE_LORA = [True]*16
+SCALE = [0.5]*8 + [16]*8
+RANK = [8]*8 + [8]*8
+
 class LoRALayer(nn.Module):
     def __init__(self, in_features, out_features, rank=8, scale=16):
         super().__init__()
@@ -112,7 +116,7 @@ class Mlp(nn.Module):
 class Attention(nn.Module):
     def __init__(
             self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., attn_head_dim=None):
+            proj_drop=0., attn_head_dim=None, use_lora=False, scale=16, rank=8):
         super().__init__()
         cfg  = get_cfg()
         self.num_heads = num_heads
@@ -121,10 +125,10 @@ class Attention(nn.Module):
             head_dim = attn_head_dim
         all_head_dim = head_dim * self.num_heads
         self.scale = qk_scale or head_dim ** -0.5
-
+        self.use_lora = use_lora    
         self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
-        if cfg.TRAINING.USE_LORA:
-            self.lora_qkv = LoRALayer(in_features=dim, out_features=all_head_dim * 3, rank=8, scale=16)
+        if cfg.TRAINING.USE_LORA and use_lora:
+            self.lora_qkv = LoRALayer(in_features=dim, out_features=all_head_dim * 3, rank=rank, scale=scale)
             # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
         if qkv_bias:
             self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
@@ -144,10 +148,11 @@ class Attention(nn.Module):
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
         # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        if cfg.TRAINING.USE_LORA:
+        if cfg.TRAINING.USE_LORA and self.use_lora:
             qkv = self.lora_qkv(x, self.qkv.weight)
             if qkv_bias is not None:
                 qkv += qkv_bias
+            print("use Lora in Attention")
         else:
             qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         
@@ -182,12 +187,12 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 attn_head_dim=None):
+                 attn_head_dim=None, use_lora=False, blk_id=0):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
+            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[blk_id], scale=SCALE[blk_id], rank=RANK[blk_id])
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -218,7 +223,7 @@ adapted from https://github.com/lucidrains/perceiver-pytorch/blob/main/perceiver
 class GeneralAttention(nn.Module):
     def __init__(
             self, dim, context_dim=None, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., attn_head_dim=None):
+            proj_drop=0., attn_head_dim=None, use_lora=False, rank=8, scale=16):
         super().__init__()
         cfg  = get_cfg()
         self.num_heads = num_heads
@@ -227,12 +232,12 @@ class GeneralAttention(nn.Module):
             head_dim = attn_head_dim
         all_head_dim = head_dim * self.num_heads
         self.scale = qk_scale or head_dim ** -0.5
-
+        self.use_lora = use_lora
         self.q = nn.Linear(dim, all_head_dim, bias=False)
         self.kv = nn.Linear(dim if context_dim is None else context_dim, all_head_dim * 2, bias=False)
-        if cfg.TRAINING.USE_LORA:
-            self.lora_q = LoRALayer(in_features=dim, out_features=all_head_dim, rank=8, scale=16)
-            self.lora_kv = LoRALayer(in_features=dim if context_dim is None else context_dim, out_features=all_head_dim * 2, rank=8, scale=16)
+        if cfg.TRAINING.USE_LORA and use_lora:
+            self.lora_q = LoRALayer(in_features=dim, out_features=all_head_dim, rank=rank, scale=scale)
+            self.lora_kv = LoRALayer(in_features=dim if context_dim is None else context_dim, out_features=all_head_dim * 2, rank=rank, scale=scale)
             # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
 
         if qkv_bias:
@@ -253,11 +258,12 @@ class GeneralAttention(nn.Module):
         if self.q_bias is not None:
             kv_bias = torch.cat((torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
         
-        if cfg.TRAINING.USE_LORA:
+        if cfg.TRAINING.USE_LORA and self.use_lora:
             q = self.lora_q(x, self.q.weight)
             if q_bias is not None:
                 q = q + q_bias
             kv = self.lora_kv(x if context is None else context, self.kv.weight)   
+            # print("use Lora in GeneralAttention")
             # kv = F.linear(input=x if context is None else context, weight=self.kv.weight, bias=kv_bias)
 
             if kv_bias is not None:
@@ -296,7 +302,7 @@ class LGBlock(nn.Module):
                  # new added
                  first_attn_type='self', third_attn_type='cross',
                  attn_param_sharing_first_third=False, attn_param_sharing_all=False,
-                 no_second=False, no_third=False,
+                 no_second=False, no_third=False, blk_id=0
                  ):
 
         super().__init__()
@@ -307,6 +313,7 @@ class LGBlock(nn.Module):
         self.third_attn_type = third_attn_type
         self.attn_param_sharing_first_third = attn_param_sharing_first_third
         self.attn_param_sharing_all = attn_param_sharing_all
+        self.blk_id = blk_id
 
         # Attention layer
         ## perform local (intra-region) attention, update messenger tokens
@@ -316,7 +323,7 @@ class LGBlock(nn.Module):
             self.first_attn_norm1 = norm_layer(dim)
         self.first_attn = GeneralAttention(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
+            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
         # self.adapter = BottleneckAdapter(dim=dim, hidden_dim=64, drop=drop)
         ## perform global (inter-region) attention on messenger tokens
         ## (messenger<->messenger)
@@ -328,7 +335,7 @@ class LGBlock(nn.Module):
             else:
                 self.second_attn = GeneralAttention(
                     dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
+                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
 
         ## perform local (intra-region) attention to inject global information into local tokens
         ## (messenger->local) or (local<->local, local<->messenger)
@@ -342,7 +349,7 @@ class LGBlock(nn.Module):
             else:
                 self.third_attn = GeneralAttention(
                     dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
+                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
 
         # FFN layer
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
@@ -523,3 +530,4 @@ def get_sinusoid_encoding_table(n_position, d_hid):
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2]) # dim 2i+1 
 
     return torch.FloatTensor(sinusoid_table).unsqueeze(0) 
+
