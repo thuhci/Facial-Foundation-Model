@@ -858,7 +858,8 @@ def main(args):
         }
         
         print(f"Final Results:")
-        print(f"Angular Error: {final_results['angular_err']:.4f}")
+        if 'angular_err' in final_results and final_results['angular_err'] is not None:
+            print(f"Angular Error: {final_results['angular_err']:.4f}")
         print(f"Acc@1: {final_results['final_acc1']:.4f}")
         print(f"Acc@5: {final_results['final_acc5']:.4f}")
         print(f"UAR: {final_results['final_uar']:.4f}")

@@ -9,25 +9,81 @@ from einops import rearrange, repeat
 from src.utils.config import get_cfg
 
 USE_LORA = [True]*16
-SCALE = [0.5]*8 + [16]*8
-RANK = [8]*8 + [8]*8
+SCALE = [16]*16
+RANK = [8]*16
 
 class LoRALayer(nn.Module):
-    def __init__(self, in_features, out_features, rank=8, scale=16):
+    def __init__(self, in_features, out_features, rank=8, scale=16, blk_id=None, attn_type=None, layer_type=None):
         super().__init__()
         self.rank = rank
         self.scale = scale
         # print(in_features, out_features, rank, alpha)
         self.lora_A = nn.Parameter(torch.zeros(self.rank, in_features))
         self.lora_B = nn.Parameter(torch.zeros(out_features, self.rank))
+        self.load_lora_weights(blk_id=blk_id, attn_type=attn_type, layer_type=layer_type, in_features=in_features, out_features=out_features, rank=rank)
         # self.lora_dropout = nn.Dropout(p=0.02)
-        nn.init.kaiming_uniform_(self.lora_A, a=0.0)
-        nn.init.zeros_(self.lora_B)
+        # nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+        # nn.init.zeros_(self.lora_B)
+
+    def load_lora_weights(self, blk_id, attn_type, layer_type, in_features, out_features, rank):
+        lora_weights_pth_path = "/root/lfz/Facial-Foundation-Model/output/lora/gaze_d16/checkpoint-best.pth"
+        if lora_weights_pth_path is not None and attn_type is not None and layer_type is not None:
+            # 从 .pth 文件加载权重
+            print(f"Loading LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type} from {lora_weights_pth_path}")
+            # 加载 .pth 文件
+            state_dict = torch.load(lora_weights_pth_path, map_location='cpu')
+            state_dict = state_dict['model'] if 'model' in state_dict else state_dict
+            # 构建键名
+            key_A = f"module.blocks.{blk_id}.{attn_type}.{layer_type}.lora_A"
+            key_B = f"module.blocks.{blk_id}.{attn_type}.{layer_type}.lora_B"
+            print(f"Looking for keys: {key_A}, {key_B}")
+
+            if key_A in state_dict and key_B in state_dict:
+                loaded_A = state_dict[key_A]
+                loaded_B = state_dict[key_B]
+
+                # 检查加载的张量形状是否匹配
+                loaded_A_shape = loaded_A.shape
+                loaded_B_shape = loaded_B.shape
+                expected_A_shape = torch.Size([rank, in_features])
+                expected_B_shape = torch.Size([out_features, rank])
+
+                if loaded_A_shape != expected_A_shape or loaded_B_shape != expected_B_shape:
+                    raise ValueError(
+                        f"Shape mismatch for block {blk_id}, attention {attn_type}, layer {layer_type}. "
+                        f"Expected A: {expected_A_shape}, B: {expected_B_shape}, "
+                        f"Got A: {loaded_A_shape}, B: {loaded_B_shape}"
+                    )
+
+                # 使用加载的张量初始化参数
+                self.lora_A = nn.Parameter(loaded_A.clone())
+                self.lora_B = nn.Parameter(loaded_B.clone())
+                print(f"Successfully loaded LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type}")
+                # 注意：这里没有从 .pth 文件加载 scale，因为 .pth 文件存储的是 state_dict，
+                # 而 scale 通常不作为参数保存在 state_dict 中，而是作为模块属性。
+                # 如果你的 .pth 文件中包含 scale 信息，需要相应调整加载逻辑。
+            else:
+                raise KeyError(f"LoRA weights not found for block {blk_id}, attention {attn_type}, layer {layer_type} in {lora_weights_pth_path}")
+
 
     def forward(self, x, original_weight):
-        lora_weight = (self.lora_B @ self.lora_A) * self.scale
-        return F.linear(x, original_weight + lora_weight)
+        if self.scale == 100:
+            lora_weight = (self.lora_B @ self.lora_A)
+            return F.linear(x, lora_weight)
+        else:
+            lora_weight = (self.lora_B @ self.lora_A) * self.scale
+            return F.linear(x, original_weight + lora_weight)
         # return F.linear(x, lora_weight)
+
+    def get_lora_weights(self):
+        return {
+            'lora_A': self.lora_A.detach().cpu().clone(),
+            'lora_B': self.lora_B.detach().cpu().clone(),
+            'scale': self.scale
+        }
+
+    def is_lora_layer(self): # 添加标识方法
+        return True
 
 class DoRALayer(nn.Module):
     def __init__(self, in_features, out_features, rank=16, alpha=1.0):
@@ -116,7 +172,7 @@ class Mlp(nn.Module):
 class Attention(nn.Module):
     def __init__(
             self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., attn_head_dim=None, use_lora=False, scale=16, rank=8):
+            proj_drop=0., attn_head_dim=None, use_lora=False, scale=16, rank=8, blk_id=0, attn_type=None):
         super().__init__()
         cfg  = get_cfg()
         self.num_heads = num_heads
@@ -128,7 +184,7 @@ class Attention(nn.Module):
         self.use_lora = use_lora    
         self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
         if cfg.TRAINING.USE_LORA and use_lora:
-            self.lora_qkv = LoRALayer(in_features=dim, out_features=all_head_dim * 3, rank=rank, scale=scale)
+            self.lora_qkv = LoRALayer(in_features=dim, out_features=all_head_dim * 3, rank=rank, scale=scale, blk_id=blk_id, attn_type=attn_type, layer_type='lora_qkv')
             # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
         if qkv_bias:
             self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
@@ -192,7 +248,7 @@ class Block(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[blk_id], scale=SCALE[blk_id], rank=RANK[blk_id])
+            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[blk_id], scale=SCALE[blk_id], rank=RANK[blk_id], blk_id=blk_id, attn_type='self_attn')
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -223,7 +279,7 @@ adapted from https://github.com/lucidrains/perceiver-pytorch/blob/main/perceiver
 class GeneralAttention(nn.Module):
     def __init__(
             self, dim, context_dim=None, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., attn_head_dim=None, use_lora=False, rank=8, scale=16):
+            proj_drop=0., attn_head_dim=None, use_lora=False, rank=8, scale=16, blk_id=0, attn_type=None):
         super().__init__()
         cfg  = get_cfg()
         self.num_heads = num_heads
@@ -236,8 +292,8 @@ class GeneralAttention(nn.Module):
         self.q = nn.Linear(dim, all_head_dim, bias=False)
         self.kv = nn.Linear(dim if context_dim is None else context_dim, all_head_dim * 2, bias=False)
         if cfg.TRAINING.USE_LORA and use_lora:
-            self.lora_q = LoRALayer(in_features=dim, out_features=all_head_dim, rank=rank, scale=scale)
-            self.lora_kv = LoRALayer(in_features=dim if context_dim is None else context_dim, out_features=all_head_dim * 2, rank=rank, scale=scale)
+            self.lora_q = LoRALayer(in_features=dim, out_features=all_head_dim, rank=rank, scale=scale, blk_id=blk_id, attn_type=attn_type, layer_type='lora_q')
+            self.lora_kv = LoRALayer(in_features=dim if context_dim is None else context_dim, out_features=all_head_dim * 2, rank=rank, scale=scale, blk_id=blk_id, attn_type=attn_type, layer_type='lora_kv')
             # self.lora_proj = LoRALayer(in_features=all_head_dim, out_features=dim, rank=8, scale=4)
 
         if qkv_bias:
@@ -323,7 +379,7 @@ class LGBlock(nn.Module):
             self.first_attn_norm1 = norm_layer(dim)
         self.first_attn = GeneralAttention(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
+            attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id], attn_type='first_attn', blk_id=self.blk_id)
         # self.adapter = BottleneckAdapter(dim=dim, hidden_dim=64, drop=drop)
         ## perform global (inter-region) attention on messenger tokens
         ## (messenger<->messenger)
@@ -335,7 +391,7 @@ class LGBlock(nn.Module):
             else:
                 self.second_attn = GeneralAttention(
                     dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
+                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id], attn_type='second_attn', blk_id=self.blk_id)
 
         ## perform local (intra-region) attention to inject global information into local tokens
         ## (messenger->local) or (local<->local, local<->messenger)
@@ -349,7 +405,7 @@ class LGBlock(nn.Module):
             else:
                 self.third_attn = GeneralAttention(
                     dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id])
+                    attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, use_lora=USE_LORA[self.blk_id], scale=SCALE[self.blk_id], rank=RANK[self.blk_id], attn_type='third_attn', blk_id=self.blk_id)
 
         # FFN layer
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
