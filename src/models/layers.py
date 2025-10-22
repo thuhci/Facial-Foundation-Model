@@ -27,7 +27,7 @@ class LoRALayer(nn.Module):
 
     def load_lora_weights(self, blk_id, attn_type, layer_type, in_features, out_features, rank):
         lora_weights_pth_path = "/root/lfz/Facial-Foundation-Model/output/lora/gaze_d16/checkpoint-best.pth"
-        if lora_weights_pth_path is not None and attn_type is not None and layer_type is not None:
+        if blk_id < 4:
             # 从 .pth 文件加载权重
             print(f"Loading LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type} from {lora_weights_pth_path}")
             # 加载 .pth 文件
@@ -36,7 +36,7 @@ class LoRALayer(nn.Module):
             # 构建键名
             key_A = f"module.blocks.{blk_id}.{attn_type}.{layer_type}.lora_A"
             key_B = f"module.blocks.{blk_id}.{attn_type}.{layer_type}.lora_B"
-            print(f"Looking for keys: {key_A}, {key_B}")
+            # print(f"Looking for keys: {key_A}, {key_B}")
 
             if key_A in state_dict and key_B in state_dict:
                 loaded_A = state_dict[key_A]
@@ -63,8 +63,10 @@ class LoRALayer(nn.Module):
                 # 而 scale 通常不作为参数保存在 state_dict 中，而是作为模块属性。
                 # 如果你的 .pth 文件中包含 scale 信息，需要相应调整加载逻辑。
             else:
-                raise KeyError(f"LoRA weights not found for block {blk_id}, attention {attn_type}, layer {layer_type} in {lora_weights_pth_path}")
-
+                # raise KeyError(f"LoRA weights not found for block {blk_id}, attention {attn_type}, layer {layer_type} in {lora_weights_pth_path}")
+                nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+                nn.init.zeros_(self.lora_B)
+                print(f"Use randomly initialized LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type}")
 
     def forward(self, x, original_weight):
         if self.scale == 100:
