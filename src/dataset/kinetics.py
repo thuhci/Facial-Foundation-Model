@@ -630,7 +630,12 @@ me: apdot similar interfaces to VideoReader in decord
 class VideoReaderFrame:
     def __init__(self, video_dir, file_ext='jpg'):
         self.video_dir = video_dir
-        self.frames = sorted(glob.glob(os.path.join(video_dir, f'*.{file_ext}')))
+        # self.frames = sorted(glob.glob(os.path.join(video_dir, f'*.{file_ext}')))
+        # jpg and png are both possible
+        self.frames = sorted(
+            glob.glob(os.path.join(video_dir, '*.jpg')) +
+            glob.glob(os.path.join(video_dir, '*.png'))
+        )
 
     def __len__(self):
         return len(self.frames)

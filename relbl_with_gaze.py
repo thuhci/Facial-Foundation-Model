@@ -18,14 +18,14 @@ from run_finetuning_with_yacs import create_data_loaders, create_model_from_conf
 all_data = []
 
 # your split-by-video folder
-csv_folder = "/home/qzk/CelebV-Text/downloaded_celebvtext/txt"   
+csv_folder = "/home/qzk/Facial-Foundation-Model/saved/data/CelebV_com_ori/train"   
 
 # config & path for your relabel model
-config_path = 'configs/gaze360T.yaml'
+config_path = '/home/qzk/Facial-Foundation-Model/output/gaze360T_16dataset/config.yaml'
 model_path = "/home/qzk/Facial-Foundation-Model/output/gaze360T_16dataset/checkpoint-best.pth"
 
 # output path for the relabeled data
-out_csv_path = "output/relabeled_data.csv"
+out_csv_path = "output/relabeled_data_celebV_gaze.csv"
 
 # read all csv  N frames
 # split by 16 frames, with name & lbl for each
@@ -164,7 +164,7 @@ class relblDataset(Dataset):
         
         return {"images": img_tensor, "labels": labels, "folder": paths}
 
-data_loader = DataLoader(relblDataset(all_data), batch_size=32, shuffle=False, num_workers=20)
+data_loader = DataLoader(relblDataset(all_data), batch_size=128, shuffle=False, num_workers=20)
 
 print("len of data_loader is ", len(data_loader))
 

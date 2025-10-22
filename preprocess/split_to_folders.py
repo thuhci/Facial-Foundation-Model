@@ -34,13 +34,14 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         os.makedirs(output_root)
     # for split in ["train", "test", "val"]:
         
-    for split in ["train", "val"]:
+    # for split in ["train", "val"]:
+    for split in ["train"]:
         print("processing split", split)
         #################################################################
         #      modify this txt_path to your original csv / txt          #
         #################################################################
-        txt_path = f"/home/qzk/Facial-Foundation-Model/saved/data/CelebV_emo_ori/{split}.csv"
-        # txt_path = "/home/qzk/CelebV-Text/downloaded_celebvtext/all_celebvtext.txt"
+        # txt_path = f"/home/qzk/Facial-Foundation-Model/saved/data/CelebV_emo_ori/{split}.csv"
+        txt_path = "/home/qzk/Facial-Foundation-Model/output/relabeled_data_celebV_gaze.csv"
         out_path = f"{output_root}/{split}"
         if not os.path.exists(out_path):
             os.makedirs(out_path)
@@ -82,6 +83,8 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
 
         # sort by rec_name, vid_name, frame_name
         
+        print(txt_lines[0])
+            
         # txt_lines.sort(key=lambda x: (x[1], x[2], x[3]))
         txt_lines.sort(key=lambda x: (x[1], x[2]))
         lst = 0
@@ -112,7 +115,7 @@ def preprocess(gap_threshold=5, len_threshold=16, save_discarded=True):
         sum_lines = []
         
         for i, file in enumerate(files):
-            out_lines = [f"{line[0]}" for line in file]
+            out_lines = [f"{line[0]} " for line in file]
             csv_path = f"{output_root}/{split}/{split}_{file[0][1]}_{i}.csv"
             if os.path.exists(csv_path):
                 os.remove(csv_path)
