@@ -698,7 +698,11 @@ class VideoRegDatasetFrame(Dataset):
         # Load all CSV files from the folder
         self.csv_files = []
         self.csv_data = []
-        self.valid_clips = []  # Store (csv_idx, start_idx) for valid clips
+        # self.valid_clips = []  # Store (csv_idx, start_idx) for valid clips
+        
+        self.valid_clips = {}
+        
+        self.all_clips = []
         
         if os.path.isdir(anno_path):
             csv_files = sorted(glob.glob(os.path.join(anno_path, '*.csv')))
@@ -736,10 +740,18 @@ class VideoRegDatasetFrame(Dataset):
                         for start_idx in range(0, max_start_idx):
                             clips_this_csv.append((csv_idx, start_idx))
                         chosen_clip = np.random.choice(len(clips_this_csv), size=1, replace=False)
-                        self.valid_clips.append(clips_this_csv[chosen_clip[0]])
+                        # self.valid_clips.append(clips_this_csv[chosen_clip[0]])
+                        if csv_idx not in self.valid_clips:
+                            self.valid_clips[csv_idx] = []
+                        self.valid_clips[csv_idx] = [clips_this_csv[chosen_clip[0]][1]]
+                        self.all_clips.append(clips_this_csv[chosen_clip[0]])
                     else:
                         for start_idx in range(0, max_start_idx, self.clip_stride):
-                            self.valid_clips.append((csv_idx, start_idx))
+                            # self.valid_clips.append((csv_idx, start_idx))
+                            if csv_idx not in self.valid_clips:
+                                self.valid_clips[csv_idx] = []
+                            self.valid_clips[csv_idx].append(start_idx)
+                            self.all_clips.append((csv_idx, start_idx))
                         
                 except Exception as e:
                     print(f"Error loading {csv_file}: {e}")
@@ -773,7 +785,8 @@ class VideoRegDatasetFrame(Dataset):
             ])
 
     def __len__(self):
-        return len(self.valid_clips)
+        # return len(self.valid_clips)
+        return len(self.valid_clips.keys()) if self.mode=='train' else len(self.all_clips)
 
     def load_frame_sequence(self, csv_idx, start_idx):
         """Load a sequence of frames and labels from a CSV file"""
@@ -884,7 +897,13 @@ class VideoRegDatasetFrame(Dataset):
 
     def __getitem__(self, index):
         cfg = get_cfg()
-        csv_idx, start_idx = self.valid_clips[index]
+        # csv_idx, start_idx = self.valid_clips[index]
+        if self.mode != 'train':
+            csv_idx, start_idx = self.all_clips[index]
+        else:
+            csv_idxs = list(self.valid_clips.keys())
+            csv_idx = csv_idxs[index]
+            start_idx = np.random.choice(self.valid_clips[csv_idx], size=1)[0]
         
         if self.mode == 'train':
             try:
