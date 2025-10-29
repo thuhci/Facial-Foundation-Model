@@ -17,7 +17,7 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -39,7 +39,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 48
+  batch_size: 16
   num_workers: 20
   pin_memory: true
 
@@ -133,7 +133,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 不启用分布式训练
+  distributed: true  # 不启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

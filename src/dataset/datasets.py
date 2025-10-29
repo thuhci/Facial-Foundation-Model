@@ -230,6 +230,38 @@ def build_dataset(is_train, test_mode):
             new_width=320, # me: actually no use
             )
         nb_classes = 7
+        
+    elif cfg.DATA.DATASET_NAME == 'CELEBV':
+        mode = None
+        anno_path = None
+        if is_train is True:
+            mode = 'train'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'train.csv')
+        elif test_mode is True:
+            mode = 'test'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
+        else:
+            mode = 'validation'
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val.csv')
+
+        dataset = VideoClsDatasetFrame(
+            anno_path=anno_path,
+            data_path='/',
+            mode=mode,
+            clip_len=cfg.DATA.NUM_FRAMES,
+            frame_sample_rate=cfg.DATA.SAMPLING_RATE,
+            num_segment=cfg.DATA.NUM_SEGMENTS,
+            test_num_segment=cfg.DATA.TEST_NUM_SEGMENT,
+            test_num_crop=cfg.DATA.TEST_NUM_CROP,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=cfg.MODEL.INPUT_SIZE,
+            short_side_size=cfg.DATA.SHORT_SIDE_SIZE,
+            new_height=256, # me: actually no use
+            new_width=320, # me: actually no use
+            file_ext='png'
+            )
+        nb_classes = 7
 
     elif cfg.DATA.DATASET_NAME == 'FERV39k':
         mode = None
@@ -242,7 +274,7 @@ def build_dataset(is_train, test_mode):
             anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
         else:
             mode = 'validation'
-            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val.csv')
 
         dataset = VideoClsDatasetFrame(
             anno_path=anno_path,
@@ -273,7 +305,7 @@ def build_dataset(is_train, test_mode):
             anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
         else:
             mode = 'validation'
-            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'test.csv')
+            anno_path = os.path.join(cfg.DATA.DATA_PATH, 'val.csv')
 
         dataset = VideoClsDatasetFrame(
             anno_path=anno_path,

@@ -14,7 +14,7 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -134,7 +134,7 @@ system:
   local_rank: -1
   dist_on_itp: false
   dist_url: env://
-  distributed: false  # 启用分布式训练
+  distributed: true  # 启用分布式训练
   
   # DeepSpeed (advanced optimization)
   enable_deepspeed: false

@@ -15,7 +15,7 @@ model:
   
   # Attention configuration
   attn_type: local_global
-  lg_region_size: [2, 2, 10]
+  lg_region_size: [2, 5, 10]
   lg_first_attn_type: self
   lg_third_attn_type: cross
   lg_attn_param_sharing_first_third: false
@@ -37,7 +37,7 @@ data:
   imagenet_default_mean_and_std: true
   
   # Data loading
-  batch_size: 16
+  batch_size: 32
   num_workers: 20
   pin_memory: true
 
@@ -97,7 +97,7 @@ training:
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 10
-  combine_loss_alpha : 1.0  # Weight for classification loss in combined loss
+  combine_loss_alpha : 1  # Weight for classification loss in combined loss
   
   # Model EMA
   model_ema: false
