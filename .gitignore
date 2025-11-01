@@ -13,3 +13,4 @@ debug_data/
 wandb/
 # *.csv
 saved/
+visual/

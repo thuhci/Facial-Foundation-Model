@@ -91,7 +91,7 @@ optimization:
   layer_decay: 0.75
 
 training:
-  epochs: 50
+  epochs: 150
   start_epoch: 0
   update_freq: 1
   save_ckpt_freq: 1

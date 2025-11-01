@@ -22,11 +22,11 @@ class LoRALayer(nn.Module):
         self.lora_B = nn.Parameter(torch.zeros(out_features, self.rank))
         self.load_lora_weights(blk_id=blk_id, attn_type=attn_type, layer_type=layer_type, in_features=in_features, out_features=out_features, rank=rank)
         # self.lora_dropout = nn.Dropout(p=0.02)
-        # nn.init.kaiming_uniform_(self.lora_A, a=0.0)
-        # nn.init.zeros_(self.lora_B)
+        nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+        nn.init.zeros_(self.lora_B)
 
     def load_lora_weights(self, blk_id, attn_type, layer_type, in_features, out_features, rank):
-        lora_weights_pth_path = "/root/lfz/Facial-Foundation-Model/output/lora/gaze_d16/checkpoint-best.pth"
+        lora_weights_pth_path = "/root/lfz/Facial-Foundation-Model/output/lora/gaze_scale16_size2510/checkpoint-best.pth"
         if blk_id < 4:
             # 从 .pth 文件加载权重
             print(f"Loading LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type} from {lora_weights_pth_path}")
@@ -62,19 +62,15 @@ class LoRALayer(nn.Module):
                 # 注意：这里没有从 .pth 文件加载 scale，因为 .pth 文件存储的是 state_dict，
                 # 而 scale 通常不作为参数保存在 state_dict 中，而是作为模块属性。
                 # 如果你的 .pth 文件中包含 scale 信息，需要相应调整加载逻辑。
-            else:
-                # raise KeyError(f"LoRA weights not found for block {blk_id}, attention {attn_type}, layer {layer_type} in {lora_weights_pth_path}")
-                nn.init.kaiming_uniform_(self.lora_A, a=0.0)
-                nn.init.zeros_(self.lora_B)
-                print(f"Use randomly initialized LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type}")
+        else:
+            # raise KeyError(f"LoRA weights not found for block {blk_id}, attention {attn_type}, layer {layer_type} in {lora_weights_pth_path}")
+            nn.init.kaiming_uniform_(self.lora_A, a=0.0)
+            nn.init.zeros_(self.lora_B)
+            print(f"Use randomly initialized LoRA weights for block {blk_id}, attention {attn_type}, layer {layer_type}")
 
     def forward(self, x, original_weight):
-        if self.scale == 100:
-            lora_weight = (self.lora_B @ self.lora_A)
-            return F.linear(x, lora_weight)
-        else:
-            lora_weight = (self.lora_B @ self.lora_A) * self.scale
-            return F.linear(x, original_weight + lora_weight)
+        lora_weight = (self.lora_B @ self.lora_A) * self.scale
+        return F.linear(x, original_weight + lora_weight)
         # return F.linear(x, lora_weight)
 
     def get_lora_weights(self):

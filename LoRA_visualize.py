@@ -95,7 +95,7 @@ def visualize_lora_stats(lora_params):
     print(f"All visualizations saved to {output_dir}")
 
 
-def visualize_lora_update_ratio_vs_original(state_dict_path, output_dir="./lora_update_comparison", scale_values=[0.5]*16):
+def visualize_lora_update_ratio_vs_original(name, state_dict_path, output_dir="./lora_update_comparison", scale_values=[0.5]*16):
     """
     可视化比较每个 block 中 LoRA 更新的权重与初始权重的 Frobenius 范数比值。
     LoRA 更新 = (lora_B @ lora_A) * scale
@@ -174,7 +174,7 @@ def visualize_lora_update_ratio_vs_original(state_dict_path, output_dir="./lora_
             # 计算比值
             if original_norm == 0:
                 print(f"Warning: Original norm for {original_name} is zero. Cannot compute ratio.")
-                ratio = float('inf') # 或者设置为 0，取决于你的需求
+                ratio = float('inf')
             else:
                 ratio = lora_update_norm / original_norm
 
@@ -222,7 +222,7 @@ def visualize_lora_update_ratio_vs_original(state_dict_path, output_dir="./lora_
     plt.ylabel('Block ID')
 
     # 保存图像
-    filename = f"lora_update_ratio_vs_original_gaze_cpt0.png"
+    filename = name
     filepath = os.path.join(output_dir, filename)
     plt.savefig(filepath, dpi=300, bbox_inches='tight') # 保存为高分辨率 PNG
     print(f"Saved LoRA update ratio heatmap to {filepath}")
@@ -460,7 +460,7 @@ import torch
 import pprint
 
 # 加载 .pth 文件
-file_path = "/root/lfz/Facial-Foundation-Model/output/partialLoRA/gaze_d16_test/checkpoint-0.pth" # 替换为你的 .pth 文件路径
+file_path = "/root/lfz/Facial-Foundation-Model/output/lora/dfew_scale16_2/checkpoint-best.pth" # 替换为你的 .pth 文件路径
 loaded_data = torch.load(file_path, map_location='cpu')
 model_weight = loaded_data['model']
 
@@ -468,14 +468,14 @@ model_weight = loaded_data['model']
 # formatted_string = pprint.pformat(loaded_data, indent=2, width=100, depth=None)
 # for k,v in model_weight.items():
 #     print(k,v.shape)
-# lora_params = {k: v for k, v in model_weight.items() if 'lora' in k}
-# print(lora_params)
-# visualize_lora_stats(lora_params)
+lora_params = {k: v for k, v in model_weight.items() if 'lora' in k}
+print(lora_params)
+visualize_lora_stats(lora_params)
 # # 将字符串写入文件
 # output_file_path = "cpt49_pth_structure.txt" # 指定输出文件名
 # with open(output_file_path, 'w', encoding='utf-8') as f:
 #     f.write(formatted_string)
 
 # print(f"Structure printed to {output_file_path}")
-SCALE_VALUES = {i: 16 for i in range(16)}
-visualize_lora_update_ratio_vs_original("/root/lfz/Facial-Foundation-Model/output/lora/gaze_d16/checkpoint-0.pth", scale_values=SCALE_VALUES)
+# SCALE_VALUES = {i: 16 for i in range(16)}
+# visualize_lora_update_ratio_vs_original(name="dfew_basic", state_dict_path="/root/lfz/Facial-Foundation-Model/output/lora/dfew_scale16_2/checkpoint-best.pth", scale_values=SCALE_VALUES)
