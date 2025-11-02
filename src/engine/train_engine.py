@@ -316,10 +316,12 @@ class TrainingEngine:
                 class_acc = (cls_pred.max(-1)[-1] == cls_tar).float().mean()
                 angular_error = compute_angular_error(reg_pred, reg_tar)
                 metric_logger.update(angular_error=angular_error)
+                metric_logger.update(class_acc=class_acc)
 
             else:
                 # Classification task
                 class_acc = (output.max(-1)[-1] == targets).float().mean()
+                metric_logger.update(class_acc=class_acc)
         else:
             class_acc = None
             
