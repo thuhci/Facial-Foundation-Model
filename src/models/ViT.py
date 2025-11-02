@@ -242,29 +242,36 @@ class VisionTransformer(nn.Module):
             # me: add frame-level prediction support
             if self.keep_temporal_dim:
                 # print("[DEBUG] keep_temporal_dim is True, x shape before rearrange:", x.shape)
-                x = rearrange(x, 'b (t hw) c -> b c t hw',
-                              t=self.patch_embed.temporal_seq_len,
-                              hw=self.patch_embed.spatial_num_patches)
-                # print("[DEBUG] keep_temporal_dim is True, x shape after rearrange:", x.shape)
-                x = x.mean(-1) # (B, C, T)
-                # original one don't seem to work
-                # x = rearrange(x, 'b t c -> b c t')  # (B, embed_dim, T)
-                # print("[DEBUG] keep_temporal_dim is True, x shape after mean pooling:", x.shape)
-                                # print("shape of x after spatial mean pooling:", x.shape)
-                # temporal upsample: 8 -> 16, for patch embedding reduction
-                # print("[DEBUG] keep_temporal_dim is True, x shape before temporal upsample:", x.shape)
-                x = torch.nn.functional.interpolate(
-                    x, scale_factor=self.patch_embed.tubelet_size,
-                    mode='linear'
-                )
-                # print("[DEBUG] keep_temporal_dim is True, x shape after temporal upsample:", x.shape)
-                x = rearrange(x, 'b c t -> b t c')
-                # print("[DEBUG] keep_temporal_dim is True, x shape after temporal upsample:", x.shape)
+                
+                if self.lg_classify_token_type == 'org':
+                    x = rearrange(x, 'b (t hw) c -> b c t hw',
+                        t=self.patch_embed.temporal_seq_len,
+                        hw=self.patch_embed.spatial_num_patches)
+                    x = x.mean(-1) # (B, C, T)
+                    x = torch.nn.functional.interpolate(
+                        x, scale_factor=self.patch_embed.tubelet_size,
+                        mode='linear'
+                    )
+                    x = rearrange(x, 'b c t -> b t c')
+                    
+                elif self.lg_classify_token_type == 'region':
+                    x = rearrange(x, 'b (nt nh nw) c -> b nt nh nw c',
+                                nt=self.lg_num_region_size[0],
+                                nh=self.lg_num_region_size[1],
+                                nw=self.lg_num_region_size[2])
+                    x = rearrange(x, 'b nt nh nw c -> b c nt (nh nw)')  # (B, C, NT, NH*NW)
+                    x = x.mean(-1)  # spatial mean pooling, (B, C, NT)
+                    x = torch.nn.functional.interpolate(
+                        x, scale_factor=self.patch_embed.tubelet_size * self.lg_region_size[0],
+                        mode='linear'
+                    )
+                    x = rearrange(x, 'b c t -> b t c')
+                    
                 return self.fc_norm(x)
             else:
                 return self.fc_norm(x.mean(1))
         else:
-            return x[:, 0]
+            return x[:, 0]  # return cls token feature, (B, embed_dim)
 
     def forward(self, x, save_feature=False):
         # print("==> in VisionTransformer forward")
